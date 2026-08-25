@@ -21,7 +21,10 @@ export function routeProgressSummary(
     const skill = decision.matchedSkillNames?.length
       ? `；命中 Skill：${decision.matchedSkillNames.join("、")}`
       : "";
-    return `识别为页面操作：${request}${evidence}${skill}；将只从已注册的客户端工具中选择。`;
+    const normalization = decision.toolInputNormalization?.length
+      ? `；已按 Tool Schema 清理 ${decision.toolInputNormalization.length} 个无效可选字段（${decision.toolInputNormalization.map((item) => item.path).join("、")}）`
+      : "";
+    return `识别为页面操作：${request}${evidence}${skill}${normalization}；将只从已注册的客户端工具中选择。`;
   }
   return `暂不能安全执行：${request}；操作目标或指令不够明确，需要进一步确认。`;
 }
@@ -56,12 +59,17 @@ export function evidenceProgressSummary(
     ...new Set(
       evidence
         .map((item) => item.title?.trim())
-        .filter((title): title is string => Boolean(title) && !isInternalEvidenceTitle(title)),
+        .filter(
+          (title): title is string =>
+            Boolean(title) && !isInternalEvidenceTitle(title),
+        ),
     ),
   ].slice(0, 8);
   const head = `${source}检索“${compactText(query, 48)}”命中 ${evidence.length} 条资料`;
   if (titles.length === 0) return `${head}。`;
-  const list = titles.map((title, index) => `${index + 1}. ${title}`).join("\n");
+  const list = titles
+    .map((title, index) => `${index + 1}. ${title}`)
+    .join("\n");
   return `${head}：\n${list}`;
 }
 

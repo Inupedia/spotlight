@@ -84,9 +84,7 @@ export function isSkillListQuery(question: string): boolean {
 }
 
 export function hasOpenTargetIntent(question: string): boolean {
-  return (
-    OPEN_TARGET_VERB_PATTERN.test(question) && !isSkillListQuery(question)
-  );
+  return OPEN_TARGET_VERB_PATTERN.test(question) && !isSkillListQuery(question);
 }
 
 export function extractOpenTargetName(question: string): string | undefined {
@@ -214,6 +212,7 @@ function validateSkillRoute(
 export function buildSkillCatalog(
   skills: SpotlightSkill[],
   clientTools: FrontendToolDescriptorV1[],
+  question = "",
 ) {
   const registeredTools = registeredToolMap(clientTools);
   return skills.map((skill) => ({
@@ -235,9 +234,57 @@ export function buildSkillCatalog(
           inputSchema: tool.inputSchema,
         };
       }),
-    capabilityExamples: skill.capabilityExamples?.slice(0, 6),
-    toolExamples: skill.toolExamples?.slice(0, 6),
+    capabilityExamples: selectRelevantItems(
+      skill.capabilityExamples ?? [],
+      question,
+      (item) => item,
+    ),
+    toolExamples: selectRelevantItems(
+      skill.toolExamples ?? [],
+      question,
+      (item) => item.example,
+    ),
   }));
+}
+
+function relevanceText(value: string): string {
+  return value
+    .normalize("NFKC")
+    .toLocaleLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, "");
+}
+
+function relevanceScore(question: string, example: string): number {
+  const query = relevanceText(question);
+  const candidate = relevanceText(example);
+  if (!query || !candidate) return 0;
+  let score = query.includes(candidate) || candidate.includes(query) ? 1000 : 0;
+  const grams = new Set<string>();
+  for (let index = 0; index < query.length - 1; index += 1) {
+    grams.add(query.slice(index, index + 2));
+  }
+  for (const gram of grams) {
+    if (candidate.includes(gram)) score += 1;
+  }
+  return score;
+}
+
+function selectRelevantItems<T>(
+  items: T[],
+  question: string,
+  textOf: (item: T) => string,
+  limit = 6,
+): T[] | undefined {
+  if (items.length === 0) return undefined;
+  return items
+    .map((item, index) => ({
+      item,
+      index,
+      score: relevanceScore(question, textOf(item)),
+    }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .slice(0, limit)
+    .map(({ item }) => item);
 }
 
 export async function routeViaSkillCatalog(
@@ -285,7 +332,7 @@ export async function routeViaSkillCatalog(
       new HumanMessage(
         JSON.stringify({
           latestUserMessage: question,
-          skills: buildSkillCatalog(skills, clientTools),
+          skills: buildSkillCatalog(skills, clientTools, question),
           conversationContext: context?.conversationContext,
           isReferential: context?.isReferential ?? false,
           lastAssistantReply: context?.lastAssistantReply ?? null,

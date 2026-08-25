@@ -32,6 +32,7 @@ Only when `ui adapter = VUE_READY`:
 - `app.use(SpotlightVue, { config, enabled: true })`
 - `getUiContext`: expose only useful already-available state such as current route, selected entity, active tab/scene; do not invent a duplicate global store
 - `getMemorySubjectId`: stable user id when available; never a rotating access token
+- do not add a host query loop; the adapter must use initialize/thread/turn/SSE/host-result lifecycle supplied by the SDK
 
 ### React / other frameworks
 
@@ -51,6 +52,9 @@ Create/reuse `spotlight-project/`:
 
 Do not copy `.inupedia/skills` into the Server image; browser/run capability context supplies host Skills.
 
+Set a bounded knowledge-provider timeout. For Yuxi, add
+`timeoutMs: ${KNOWLEDGE_TIMEOUT_MS:-120000}` and keep the key Server-side.
+
 ## Verify locally
 
 Run:
@@ -59,6 +63,8 @@ Run:
 2. host typecheck/build/tests that cover changed files
 3. live health + gold benchmark only if Server/model credentials/runtime are available
 4. for `ADAPTER_REQUIRED`, explicitly verify Core Agentization separately from visual embedding
+5. exercise initialize, thread reuse, resumable SSE, host result acknowledgement and refreshed UI context through the SDK
+6. run the representative dev/production parity matrix from [testing.md](../testing.md) before release
 
 A package-registry, Docker, provider-key, or network blocker is `BLOCKED`, not `PASS`.
 

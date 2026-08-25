@@ -4,6 +4,7 @@ import type {
   FrontendToolDescriptorV1,
   HostToolResultRequest,
 } from "@inupedia/spotlight-protocol";
+import type { ClientToolInputNormalizationRemoval } from "./tools.js";
 
 export type AgentRoute = "knowledge" | "action" | "clarify";
 
@@ -26,6 +27,8 @@ export interface IntentDecision {
   requestedToolNames: string[];
   /** Structured arguments extracted for an exactly selected Skill tool. */
   requestedToolInput?: Record<string, unknown>;
+  /** Sanitized paths removed before Tool schema validation; values are never recorded. */
+  toolInputNormalization?: ClientToolInputNormalizationRemoval[];
   explicitActionEvidence: string | null;
   /** Consumer Skills deterministically matched for this turn. */
   matchedSkillNames?: string[];

@@ -3,6 +3,7 @@ import {
   applyToolInputCompletenessFence,
   LangChainIntentRouter,
 } from "../src/router.js";
+import { normalizeClientToolInputDetailed } from "../src/tools.js";
 
 const readOnlyVideoTool = {
   name: "getVideoInfo",
@@ -70,6 +71,57 @@ describe("LangChain intent router", () => {
 
     expect(decision.route).toBe("action");
     expect(decision.requestedToolInput).toEqual({ name: "钢筋棚加工区2" });
+    expect(decision.toolInputNormalization).toEqual([
+      { path: "$.videoChannelId", reason: "optional_null" },
+      { path: "$.invented", reason: "unknown_property" },
+    ]);
+  });
+
+  it("recursively normalizes nested client-tool input and reports what changed", () => {
+    const descriptor = {
+      name: "openAsset",
+      version: "1.0.0",
+      description: "打开资产",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          target: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              floor: { type: "string" },
+              nullableNote: { type: ["string", "null"] },
+            },
+            required: ["name"],
+            additionalProperties: false,
+          },
+        },
+        required: ["target"],
+        additionalProperties: false,
+      },
+      sideEffect: "ui" as const,
+      replayPolicy: "never" as const,
+      riskLevel: "low" as const,
+    };
+
+    const result = normalizeClientToolInputDetailed(descriptor, {
+      target: {
+        name: "泸定取水口",
+        floor: null,
+        nullableNote: null,
+        invented: "模型臆造",
+      },
+      unexpected: true,
+    });
+
+    expect(result.input).toEqual({
+      target: { name: "泸定取水口", nullableNote: null },
+    });
+    expect(result.removed).toEqual([
+      { path: "$.target.floor", reason: "optional_null" },
+      { path: "$.target.invented", reason: "unknown_property" },
+      { path: "$.unexpected", reason: "unknown_property" },
+    ]);
   });
 
   it("routes informational questions to knowledge when no consumer skills are registered", async () => {

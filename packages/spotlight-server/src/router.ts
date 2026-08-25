@@ -15,7 +15,7 @@ import {
   routeViaSkillCatalog,
   type SkillRouteResult,
 } from "./skillIntentRouter.js";
-import { normalizeClientToolInput } from "./tools.js";
+import { normalizeClientToolInputDetailed } from "./tools.js";
 
 const intentSchema = z.object({
   route: z.enum(["knowledge", "action", "clarify"]),
@@ -265,13 +265,18 @@ export function applyToolInputCompletenessFence(
   const selectedTool = selectedToolAndRequired(decision, clientTools).tool;
   const normalizedDecision =
     selectedTool && decision.requestedToolInput
-      ? {
-          ...decision,
-          requestedToolInput: normalizeClientToolInput(
+      ? (() => {
+          const normalized = normalizeClientToolInputDetailed(
             selectedTool,
             decision.requestedToolInput,
-          ),
-        }
+          );
+          return {
+            ...decision,
+            requestedToolInput: normalized.input,
+            toolInputNormalization:
+              normalized.removed.length > 0 ? normalized.removed : undefined,
+          };
+        })()
       : decision;
   const missing = missingRequiredToolInputKeys(normalizedDecision, clientTools);
   if (missing.length > 0) {

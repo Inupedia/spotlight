@@ -15,7 +15,8 @@ Do not mix these responsibilities. `spotlight-integrate` may refactor the host o
 
 ```text
 user language
-  -> Spotlight Server router
+  -> Spotlight Client lifecycle (initialize/thread/turn/SSE)
+  -> Spotlight Server LangGraph router
   -> host Skill (intent + allowed-tools)
   -> Client Tool (typed adapter + safety metadata)
   -> existing Store / Service / Router / page engine
@@ -28,12 +29,12 @@ A successful integration keeps **one source of truth** for business behavior: th
 
 Every user-facing capability discovered in the host must end in exactly one class:
 
-| Class | Meaning | Default action |
-|---|---|---|
-| `DIRECT` | exported/callable, speakable, safe enough | wrap as Client Tool |
-| `REFACTOR` | real behavior exists but is trapped in component-local code | extract a behavior-preserving host function, then wrap only if allowed |
-| `GATED` | real behavior exists but is destructive, external, irreversible, or security-sensitive | do not auto-expose; require explicit user allowlist and confirmation design |
-| `REJECT` | invented, generic escape hatch, renderer-internal, or not speakable | never expose |
+| Class      | Meaning                                                                                | Default action                                                              |
+| ---------- | -------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `DIRECT`   | exported/callable, speakable, safe enough                                              | wrap as Client Tool                                                         |
+| `REFACTOR` | real behavior exists but is trapped in component-local code                            | extract a behavior-preserving host function, then wrap only if allowed      |
+| `GATED`    | real behavior exists but is destructive, external, irreversible, or security-sensitive | do not auto-expose; require explicit user allowlist and confirmation design |
+| `REJECT`   | invented, generic escape hatch, renderer-internal, or not speakable                    | never expose                                                                |
 
 Coverage must report all four classes. “Not exposed” is not the same as “missing”.
 
@@ -64,14 +65,23 @@ The Server may apply **generic** intent families (read/list, named open/view, mu
 
 ## Compatibility boundary
 
-The automated wiring path currently targets **Vue 3 + Vite**. Other hosts are still analyzable:
+Compatibility has two independent axes:
 
-- Vue 3 + Vite + compatible peers -> `READY`
-- Vue 3 + Vite + peer mismatch -> `UPGRADE_REQUIRED`
-- Vue 3 without Vite -> `BUILD_MIGRATION_REQUIRED`
-- Vue 2 / non-Vue -> `UNSUPPORTED_AUTOMATION`
+- **Core Agentization:** a JS/TS host that can register Client Tools and reach the Server can be `READY`, regardless of visual framework.
+- **UI Adapter:** Vue 3 has the published `@inupedia/spotlight-vue` shell; React/other hosts remain Core-ready but `ADAPTER_REQUIRED` until a compatible shell exists.
 
-For the last three, produce a compatibility/readiness report and stop before changing the build system unless the user explicitly requests that migration.
+Vite is the shipped automatic Tool compiler path. A non-Vite host may require a
+build hook or explicit manifest generation; classify that as
+`BUILD_MIGRATION_REQUIRED`, not as evidence that its business capabilities are
+unsupported.
+
+## State and identity boundary
+
+- `uiContext` is a bounded observation of current route/selection/scene; it is not a duplicate global store.
+- Client Tool results carry a post-action observation so the Server sees the new host state.
+- Conversation/thread memory is separate from optional cross-session memory.
+- Cross-session memory requires a stable authenticated subject id; opaque access tokens disable it rather than becoming identity.
+- Entity catalogs remain consumer data and may be refreshed at runtime without rebuilding the generic Server.
 
 ## Safety defaults
 

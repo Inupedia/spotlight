@@ -109,7 +109,9 @@ export default defineSpotlightConfig({
 });
 ```
 
-Use a stable login user id when available. Never use a rotating access token.
+Use a stable login user id when available. Return `undefined`/`null` for opaque
+tokens; this disables cross-session memory while preserving thread memory. Never
+hash, slice, or otherwise derive identity from rotating bearer-token bytes.
 
 ## Vite plugin
 
@@ -196,6 +198,7 @@ providers:
     type: yuxi
     baseUrl: ${KNOWLEDGE_BASE_URL}
     apiKey: ${KNOWLEDGE_API_KEY:-}
+    timeoutMs: ${KNOWLEDGE_TIMEOUT_MS:-120000}
   webSearch:
     type: hikari
     baseUrl: ${TAVILY_API_BASE}

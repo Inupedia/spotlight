@@ -5,9 +5,12 @@ description: Agentizes an existing frontend with Inupedia Spotlight by discoveri
 
 # Spotlight Integrate
 
-Turn **this** host app into a Spotlight adapter. Do not copy another product's tools, domains, catalog strings, or business behavior.
+Turn **this** host app into a thin Spotlight 0.7.x adapter. The consumer registers
+typed Tools, Skills, catalogs and UI context; the deployable Spotlight Server owns
+LangChain/LangGraph routing, lifecycle, providers, memory and host dispatch.
 
-If a behavior does not exist in the host repo, it is not a Client Tool.
+Do not copy another product's domains or behavior. If a behavior does not exist
+in the host, it is not a Client Tool.
 
 ## Read first (mandatory)
 
@@ -22,18 +25,31 @@ Pin all published `@inupedia/spotlight-*` packages to the **same registry versio
 
 Resume from `.spotlight-integrate/PIPELINE_STATE.md` if present. Template: [methodology/00-pipeline-state.md](methodology/00-pipeline-state.md).
 
-| Stage | Spec | Output |
-|---|---|---|
-| 0 | [methodology/01-stage0-overview.md](methodology/01-stage0-overview.md) | `FRONTEND_OVERVIEW.md`, `COMPATIBILITY.md` |
-| 1 | [methodology/02-stage1-extract.md](methodology/02-stage1-extract.md) | `candidates/*` |
-| 1.5 | [methodology/03-stage1.5-verify.md](methodology/03-stage1.5-verify.md) | `verified.md`, `leftovers.md`, `rejected/` |
-| 2 | [methodology/04-stage2-tools.md](methodology/04-stage2-tools.md) | `src/spotlight/tools.ts` |
-| 3 | [methodology/05-stage3-skills.md](methodology/05-stage3-skills.md) | `.inupedia/skills/**/SKILL.md` |
-| 4 | [methodology/06-stage4-pressure-test.md](methodology/06-stage4-pressure-test.md) | `gold-questions.md`, benchmark plan/results |
-| 5 | [methodology/07-stage5-wire.md](methodology/07-stage5-wire.md) | core config, Vite, project pack, optional UI adapter — paths per [standard.md](standard.md) |
-| 6 | [methodology/08-stage6-report.md](methodology/08-stage6-report.md) | `INTEGRATION_REPORT.md` |
+| Stage | Spec                                                                             | Output                                                                                      |
+| ----- | -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 0     | [methodology/01-stage0-overview.md](methodology/01-stage0-overview.md)           | `FRONTEND_OVERVIEW.md`, `COMPATIBILITY.md`                                                  |
+| 1     | [methodology/02-stage1-extract.md](methodology/02-stage1-extract.md)             | `candidates/*`                                                                              |
+| 1.5   | [methodology/03-stage1.5-verify.md](methodology/03-stage1.5-verify.md)           | `verified.md`, `leftovers.md`, `rejected/`                                                  |
+| 2     | [methodology/04-stage2-tools.md](methodology/04-stage2-tools.md)                 | `src/spotlight/tools.ts`                                                                    |
+| 3     | [methodology/05-stage3-skills.md](methodology/05-stage3-skills.md)               | `.inupedia/skills/**/SKILL.md`                                                              |
+| 4     | [methodology/06-stage4-pressure-test.md](methodology/06-stage4-pressure-test.md) | `gold-questions.md`, benchmark plan/results                                                 |
+| 5     | [methodology/07-stage5-wire.md](methodology/07-stage5-wire.md)                   | core config, Vite, project pack, optional UI adapter — paths per [standard.md](standard.md) |
+| 6     | [methodology/08-stage6-report.md](methodology/08-stage6-report.md)               | `INTEGRATION_REPORT.md`                                                                     |
 
 Extractors: [extractors/](extractors/). File snippets: [templates.md](templates.md). Shape-only example: [examples.md](examples.md). Human install + paste-to-LLM: [README.md](README.md) / [prompt.sh](prompt.sh).
+
+## 0.7.x runtime contract
+
+The browser adapter must use the current lifecycle through the SDK:
+
+1. initialize capabilities (`POST /v1/initialize`);
+2. create/reuse a thread (`POST /v1/threads`);
+3. start a turn (`POST /v1/threads/:threadId/turns`);
+4. consume ordered SSE events (`GET /v1/turns/:turnId/events`) and execute only manifest-bound host calls;
+5. acknowledge Tool results (`POST /v1/turns/:turnId/tool-results`) with correlation id, trace and refreshed UI context.
+
+Do not hand-code this transport when the published client/UI adapter already
+implements it. Never fall back to a removed legacy query loop.
 
 ## Hard rules
 
@@ -50,6 +66,10 @@ Extractors: [extractors/](extractors/). File snippets: [templates.md](templates.
 11. **Layout** must match [standard.md](standard.md). Do not invent a second `projectId` or tools entrypoint.
 12. **Do not claim runtime accuracy without a live run.** Static/dry checks are readiness only.
 13. **Do not confuse Core Agentization with the visual shell.** `@inupedia/spotlight-client` + protocol + Server/Skills/Tools are the core path. `@inupedia/spotlight-vue` is the currently shipped Vue UI/runtime adapter, not a requirement for Server benchmarking of a non-Vue host.
+14. **Catalogs stay consumer-owned.** Runtime entity names/aliases belong in consumer Skills, command/catalog overlays, or Tool-backed reads; never hard-code them in generic Server code.
+15. **Schemas are strict.** Optional non-null fields may be omitted; nullable fields must declare `null`; unknown properties are rejected when `additionalProperties: false`. The Server normalizes model output recursively but does not repair a dishonest schema.
+16. **Memory identity is stable.** Use an authenticated immutable subject id. Never use a bearer token, token prefix, email display string, or anonymous session id as cross-session identity.
+17. **Production parity is a gate.** Dev success is insufficient: repeat representative prompts against the exact production model, Project Pack, frontend build manifest and Server image.
 
 ## Compatibility behavior
 
@@ -63,7 +83,7 @@ Compatibility is two-axis: **Core Agentization** and **UI Adapter**.
 - Legacy/non-JS host with no viable browser Tool integration → `core=UNSUPPORTED_AUTOMATION`; still produce the readiness report.
 - Zero verified tools → knowledge-only integration is valid; report all leftovers.
 
-A missing visual adapter blocks embedding the Spotlight command UI, **not** the validity of a Server + Skill + Tool benchmark.
+A missing visual adapter blocks embedding the Spotlight command UI, **not** the validity of a Server + Skill + Tool benchmark. See [architecture.md](architecture.md) for the current two-axis matrix; do not use the older Vue-only classification.
 
 ## Refactor behavior
 

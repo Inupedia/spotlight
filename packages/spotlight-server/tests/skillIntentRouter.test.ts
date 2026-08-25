@@ -1,4 +1,5 @@
 import {
+  buildSkillCatalog,
   enrichSkillToolRoute,
   extractMonitorTargetName,
   extractOpenTargetName,
@@ -292,5 +293,30 @@ describe("skill tool route enrichment", () => {
   it("recognizes English list and open intent families", () => {
     expect(isSkillListQuery("list available products")).toBe(true);
     expect(hasOpenTargetIntent("open Classic Tee")).toBe(true);
+  });
+
+  it("keeps query-relevant examples even when they are late in a large Skill catalog", () => {
+    const catalog = buildSkillCatalog(
+      [
+        {
+          ...mediaSkill,
+          capabilityExamples: [
+            "打开大坝监控",
+            "播放隧洞监控",
+            "看看进水口",
+            "显示厂房视频",
+            "查看生活区",
+            "打开料场",
+            "我想看一下钢筋棚加工区2",
+            "关闭当前监控",
+          ],
+        },
+      ],
+      clientTools,
+      "我想看一下钢筋棚加工区2",
+    );
+
+    expect(catalog[0]?.capabilityExamples).toContain("我想看一下钢筋棚加工区2");
+    expect(catalog[0]?.capabilityExamples).toHaveLength(6);
   });
 });

@@ -8,12 +8,14 @@ Write `.spotlight-integrate/INTEGRATION_REPORT.md`. This is the final acceptance
 # Spotlight integration report
 
 ## Compatibility
+
 - status: READY | UPGRADE_REQUIRED | BUILD_MIGRATION_REQUIRED | UNSUPPORTED_AUTOMATION
 - host versions: ...
 - Spotlight version: ...
 - blockers: ...
 
 ## Capability coverage
+
 | class | discovered | wrapped | remaining |
 | DIRECT | | | |
 | REFACTOR | | | |
@@ -24,18 +26,28 @@ Discovery coverage: X/Y
 Direct exposure coverage: X/Y
 
 ## Generated adapter
+
 - Client Tools: N
 - Skills: N (+ skill.knowledge)
 - uiContext fields: ...
 - projectId: ...
 
 ## Static integrity
+
 - tool/allowlist alignment: PASS/FAIL
 - projectId alignment: PASS/FAIL
 - JSDoc/schema/safety metadata: PASS/FAIL
 - build/typecheck/test: PASS/FAIL/BLOCKED
 
+## Runtime lifecycle
+
+- initialize/thread/turn: PASS/FAIL/BLOCKED
+- SSE resume/order: PASS/FAIL/BLOCKED
+- host Tool acknowledgement + trace: PASS/FAIL/BLOCKED
+- post-action UI context: PASS/FAIL/BLOCKED
+
 ## Live benchmark
+
 - status: RUN / NOT RUN
 - target model: ...
 - Route Accuracy: ...
@@ -45,19 +57,25 @@ Direct exposure coverage: X/Y
 - E2E Success Rate: ...
 - Clarification Accuracy: ...
 - Unsafe Execution Rate: ...
+- dev/prod repeated parity: PASS/FAIL/BLOCKED
+- Server version/image + frontend build id + model id: ...
 
 ## Safety / gated capabilities
+
 - ...
 
 ## Leftovers
+
 - REFACTOR: ...
 - GATED: ...
 - blockers: ...
 
 ## Runbook
+
 - env keys: ...
 - boot order: ...
 - smoke command/prompts: ...
+- rollback procedure: ...
 ```
 
 ## Percentage rules

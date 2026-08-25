@@ -44,34 +44,105 @@ export interface LangChainToolProgress {
  * selected client tool. Unknown fields are also discarded when the consumer
  * manifest explicitly forbids them.
  */
-export function normalizeClientToolInput(
-  descriptor: FrontendToolDescriptorV1,
-  input: Record<string, unknown>,
-): Record<string, unknown> {
-  const schema = descriptor.inputSchema;
-  if (!schema || typeof schema !== "object") return { ...input };
+export interface ClientToolInputNormalizationRemoval {
+  path: string;
+  reason: "optional_null" | "optional_undefined" | "unknown_property";
+}
+
+export interface ClientToolInputNormalizationResult {
+  input: Record<string, unknown>;
+  removed: ClientToolInputNormalizationRemoval[];
+}
+
+function schemaAllowsNull(schema: unknown): boolean {
+  if (!schema || typeof schema !== "object") return false;
+  const candidate = schema as Record<string, unknown>;
+  if (candidate.type === "null") return true;
+  if (Array.isArray(candidate.type) && candidate.type.includes("null")) {
+    return true;
+  }
+  for (const key of ["anyOf", "oneOf"] as const) {
+    if (
+      Array.isArray(candidate[key]) &&
+      candidate[key].some((item) => schemaAllowsNull(item))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function normalizeSchemaValue(
+  value: unknown,
+  schema: unknown,
+  path: string,
+  removed: ClientToolInputNormalizationRemoval[],
+): unknown {
+  if (!schema || typeof schema !== "object") return value;
+  const candidate = schema as Record<string, unknown>;
+  if (Array.isArray(value)) {
+    return value.map((item, index) =>
+      normalizeSchemaValue(item, candidate.items, `${path}[${index}]`, removed),
+    );
+  }
+  if (!value || typeof value !== "object") return value;
+
   const properties =
-    schema.properties && typeof schema.properties === "object"
-      ? (schema.properties as Record<string, unknown>)
+    candidate.properties && typeof candidate.properties === "object"
+      ? (candidate.properties as Record<string, unknown>)
       : {};
   const required = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.filter(
+    Array.isArray(candidate.required)
+      ? candidate.required.filter(
           (field): field is string => typeof field === "string",
         )
       : [],
   );
-  const rejectUnknown = schema.additionalProperties === false;
+  const rejectUnknown = candidate.additionalProperties === false;
+  const result: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    const itemPath = `${path}.${key}`;
+    const itemSchema = properties[key];
+    if (rejectUnknown && !Object.hasOwn(properties, key)) {
+      removed.push({ path: itemPath, reason: "unknown_property" });
+      continue;
+    }
+    if (item === undefined && !required.has(key)) {
+      removed.push({ path: itemPath, reason: "optional_undefined" });
+      continue;
+    }
+    if (item === null && !required.has(key) && !schemaAllowsNull(itemSchema)) {
+      removed.push({ path: itemPath, reason: "optional_null" });
+      continue;
+    }
+    result[key] = normalizeSchemaValue(item, itemSchema, itemPath, removed);
+  }
+  return result;
+}
 
-  return Object.fromEntries(
-    Object.entries(input).filter(([key, value]) => {
-      if (rejectUnknown && !Object.hasOwn(properties, key)) return false;
-      if ((value === null || value === undefined) && !required.has(key)) {
-        return false;
-      }
-      return true;
-    }),
-  );
+export function normalizeClientToolInputDetailed(
+  descriptor: FrontendToolDescriptorV1,
+  input: Record<string, unknown>,
+): ClientToolInputNormalizationResult {
+  const schema = descriptor.inputSchema;
+  if (!schema || typeof schema !== "object") {
+    return { input: { ...input }, removed: [] };
+  }
+  const removed: ClientToolInputNormalizationRemoval[] = [];
+  return {
+    input: normalizeSchemaValue(input, schema, "$", removed) as Record<
+      string,
+      unknown
+    >,
+    removed,
+  };
+}
+
+export function normalizeClientToolInput(
+  descriptor: FrontendToolDescriptorV1,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  return normalizeClientToolInputDetailed(descriptor, input).input;
 }
 
 export function createClientLangChainTool(

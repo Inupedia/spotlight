@@ -6,12 +6,12 @@ This file is the **single contract** for compatibility, install, directory layou
 
 Copy the **entire** `spotlight-integrate/` directory, not only `SKILL.md`.
 
-| Agent | Path |
-|---|---|
-| Cursor, this machine | `~/.cursor/skills/spotlight-integrate/` |
-| Cursor, this repo | `<app>/.cursor/skills/spotlight-integrate/` |
-| Codex | `<app>/.codex/skills/spotlight-integrate/` |
-| Claude Code | `<app>/.claude/skills/spotlight-integrate/` |
+| Agent                | Path                                        |
+| -------------------- | ------------------------------------------- |
+| Cursor, this machine | `~/.cursor/skills/spotlight-integrate/`     |
+| Cursor, this repo    | `<app>/.cursor/skills/spotlight-integrate/` |
+| Codex                | `<app>/.codex/skills/spotlight-integrate/`  |
+| Claude Code          | `<app>/.claude/skills/spotlight-integrate/` |
 
 Then in the host frontend chat:
 
@@ -29,21 +29,21 @@ Compatibility is **two-axis**: Core Agentization and visual UI adapter.
 
 ### Core classification
 
-| Status | Condition | Action |
-|---|---|---|
-| `READY` | Browser JS/TS host can compile/register framework-neutral Client Tools and reach Spotlight Server | continue core pipeline |
-| `UPGRADE_REQUIRED` | Core package/build/Node ranges are incompatible | report exact mismatch; do not force upgrade |
-| `BUILD_MIGRATION_REQUIRED` | Current build cannot support the Tool compiler/runtime path without migration | analyze capabilities; stop before build migration unless requested |
-| `UNSUPPORTED_AUTOMATION` | No viable browser Tool integration path exists | readiness report only |
+| Status                     | Condition                                                                                         | Action                                                             |
+| -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `READY`                    | Browser JS/TS host can compile/register framework-neutral Client Tools and reach Spotlight Server | continue core pipeline                                             |
+| `UPGRADE_REQUIRED`         | Core package/build/Node ranges are incompatible                                                   | report exact mismatch; do not force upgrade                        |
+| `BUILD_MIGRATION_REQUIRED` | Current build cannot support the Tool compiler/runtime path without migration                     | analyze capabilities; stop before build migration unless requested |
+| `UNSUPPORTED_AUTOMATION`   | No viable browser Tool integration path exists                                                    | readiness report only                                              |
 
 ### UI adapter classification
 
-| Status | Condition | Action |
-|---|---|---|
-| `VUE_READY` | Vue 3 host satisfies `@inupedia/spotlight-vue` peer ranges | embed Vue command UI/runtime |
-| `UPGRADE_REQUIRED` | Vue host exists but Vue/Pinia/Node peers are incompatible | continue core when possible; do not force upgrade |
-| `ADAPTER_REQUIRED` | React/other framework host has no shipped visual adapter | continue core + headless Server benchmark; report visual-shell gap |
-| `HEADLESS_ONLY` | Product intentionally does not embed a visual command shell | continue core/runtime benchmark only |
+| Status             | Condition                                                   | Action                                                             |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------------------------------------ |
+| `VUE_READY`        | Vue 3 host satisfies `@inupedia/spotlight-vue` peer ranges  | embed Vue command UI/runtime                                       |
+| `UPGRADE_REQUIRED` | Vue host exists but Vue/Pinia/Node peers are incompatible   | continue core when possible; do not force upgrade                  |
+| `ADAPTER_REQUIRED` | React/other framework host has no shipped visual adapter    | continue core + headless Server benchmark; report visual-shell gap |
+| `HEADLESS_ONLY`    | Product intentionally does not embed a visual command shell | continue core/runtime benchmark only                               |
 
 A missing visual adapter is **not** the same as unsupported Core Agentization.
 
@@ -110,13 +110,13 @@ If the host already has tools or `defineSpotlightConfig` elsewhere, reuse those 
 
 ## 4. Naming
 
-| Thing | Rule | Shape-only example |
-|---|---|---|
-| `projectId` | kebab-case; identical in Tool compiler, config, yml, env | `media-console` |
-| Client Tool | camelCase, verb-first export | `getItemList`, `openItem`, `addItem` |
-| Skill id | `skill.` + dotted domain | `skill.items` |
-| Skill folder | equals id | `.inupedia/skills/skill.items/SKILL.md` |
-| npm packages | exact same published version | `0.x.y` |
+| Thing        | Rule                                                     | Shape-only example                      |
+| ------------ | -------------------------------------------------------- | --------------------------------------- |
+| `projectId`  | kebab-case; identical in Tool compiler, config, yml, env | `media-console`                         |
+| Client Tool  | camelCase, verb-first export                             | `getItemList`, `openItem`, `addItem`    |
+| Skill id     | `skill.` + dotted domain                                 | `skill.items`                           |
+| Skill folder | equals id                                                | `.inupedia/skills/skill.items/SKILL.md` |
+| npm packages | exact same published version                             | `0.x.y`                                 |
 
 Read names, route titles, and button labels from **this** host repo.
 
@@ -174,6 +174,8 @@ Every generated Tool must:
 
 **Schema fidelity rule:** derive Tool schemas from the actual Store/Service/API/function boundary, not from a convenient benchmark shape. Do not casually widen `Long`/numeric ids to `string | number`, and do not narrow a real host union merely to improve model scoring. If the Tool intentionally adapts the host contract, the adapter must contain the explicit conversion and the generated report/gold set must test the Tool's real adapter contract. Never add generic Server-side coercion just to compensate for an inaccurate Tool schema.
 
+The 0.7.3 Server recursively removes optional `null`/`undefined` values and undeclared object fields when the Tool schema forbids additional properties. This is a model-output boundary, not permission to declare loose or inaccurate schemas. A field that legitimately accepts `null` must declare it with `type: ["string", "null"]`, `anyOf`, or `oneOf`.
+
 **Behavior fidelity rule:** a user-visible action is not `DIRECT` merely because its final step is an HTTP call. Follow the real behavior through component state, session data, route/query state, validation, chained calls, and all writes. If the UI behavior depends on component-local state or performs multiple/transitive writes, classify it `REFACTOR` (and `GATED` when risk requires it) until the complete behavior is extracted into a stable host capability shared by UI and Agent. Do not fabricate a simplified Tool that skips those invariants.
 
 **Authorization rule:** static Skill/Tool declarations describe capability; they never grant permission. If availability depends on the current role, tenant, record ownership, workflow state, feature flag, or another live host condition, keep that guard in the host and include the capability in the live Tool set only when it is currently available. The Tool handler/backend must re-check authorization at execution time. Never duplicate or weaken product-specific RBAC/ABAC rules inside the generic Spotlight Server.
@@ -204,13 +206,41 @@ SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1
 SILICONFLOW_MODEL=
 KNOWLEDGE_BASE_URL=
 KNOWLEDGE_API_KEY=
+KNOWLEDGE_TIMEOUT_MS=120000
 TAVILY_API_BASE=
 TAVILY_API_KEY=
 ```
 
 Never copy host secrets into Skills. Never put LLM/provider keys in `VITE_*`.
 
-## 8. Boot order
+Provider adapters are selected in `spotlight.project.yml`. Built-ins are conveniences, not lock-in: a project module may register a custom knowledge/web provider (for example RAGFlow or a private Tavily proxy) without changing generic Server routing.
+
+## 8. Runtime lifecycle and deployment
+
+The published client/UI adapter owns the transport sequence:
+
+```text
+POST /v1/initialize
+POST /v1/threads
+POST /v1/threads/:threadId/turns
+GET  /v1/turns/:turnId/events         (SSE, resumable)
+POST /v1/turns/:turnId/tool-results
+```
+
+Do not implement a consumer-side query loop or call a legacy `/query` endpoint.
+The frontend manifest version and build id must match the deployed browser build;
+otherwise host Tool dispatch must fail closed.
+
+Production deployment must:
+
+- pin an immutable Server image/package version;
+- preserve persistent database and memory volumes;
+- recreate only the Spotlight Server service for a Server-only release;
+- wait for `/health` before declaring success;
+- retain the previous image and roll back on failed health;
+- verify the frontend build id separately after its own deployment.
+
+## 9. Boot order
 
 Core/headless benchmark:
 
@@ -221,7 +251,7 @@ Core/headless benchmark:
 
 Vue visual integration adds opening the embedded Spotlight command UI after the host frontend starts.
 
-## 9. Definition of done
+## 10. Definition of done
 
 Integration is done only when all applicable gates hold:
 
@@ -238,10 +268,13 @@ Integration is done only when all applicable gates hold:
 - static checks pass;
 - `INTEGRATION_REPORT.md` distinguishes static readiness, Core Agentization, UI embedding, and live accuracy;
 - live metrics are reported only if the Server + target LLM actually ran.
+- `/v1/initialize`, thread creation, SSE, host Tool acknowledgement and refreshed UI context are verified through the published SDK path;
+- representative production prompts pass repeatedly against the production model/config/build, not only once in dev;
+- Server-only deployment does not recreate the database service and has a tested rollback path.
 
 A project may be Core-Agentized and benchmarked successfully while its visual adapter remains `ADAPTER_REQUIRED`; that state must be reported explicitly rather than mislabeled as a complete embedded UI integration.
 
-## 10. What must not appear in the host app
+## 11. What must not appear in the host app
 
 - LangGraph/custom planner added solely for Spotlight integration
 - copied product-specific Skill ids/tool names from the integration pack
@@ -253,3 +286,5 @@ A project may be Core-Agentized and benchmarked successfully while its visual ad
 - DOM-click automation where a stable Store/Service/Router capability exists
 - authorization bypasses or generic Server copies of product-specific RBAC/ABAC rules
 - claims such as “95% accuracy” derived only from grep/static checks
+- bearer token bytes used as `memorySubjectId`
+- a consumer-side replacement for the Server LangGraph lifecycle

@@ -43,13 +43,13 @@ Write `.spotlight-integrate/gold-questions.md`:
 ```md
 # Gold questions
 
-| id | prompt | expectRoute | expectSkill | expectTool | expectArgs | notTools | expectGuard |
-|---|---|---|---|---|---|---|---|
-| products-list | 有哪些商品 | action | skill.products | getProductList | {} | openProduct | none |
-| products-open | 打开 <REAL_OR_RUNTIME_CATALOG_NAME> | action | skill.products | openProduct | {"productName":"<REAL_OR_RUNTIME_CATALOG_NAME>"} | getProductList | none |
-| knowledge | 介绍一下这个系统 | knowledge | skill.knowledge | | | * | none |
-| ambiguous | 打开那个 | clarify | skill.products | | | * | clarify |
-| gated | 提交订单 | clarify | skill.checkout | | | submitOrder | confirm-or-deny |
+| id            | prompt                              | expectRoute | expectSkill     | expectTool     | expectArgs                                       | notTools       | expectGuard     |
+| ------------- | ----------------------------------- | ----------- | --------------- | -------------- | ------------------------------------------------ | -------------- | --------------- |
+| products-list | 有哪些商品                          | action      | skill.products  | getProductList | {}                                               | openProduct    | none            |
+| products-open | 打开 <REAL_OR_RUNTIME_CATALOG_NAME> | action      | skill.products  | openProduct    | {"productName":"<REAL_OR_RUNTIME_CATALOG_NAME>"} | getProductList | none            |
+| knowledge     | 介绍一下这个系统                    | knowledge   | skill.knowledge |                |                                                  | *              | none            |
+| ambiguous     | 打开那个                            | clarify     | skill.products  |                |                                                  | *              | clarify         |
+| gated         | 提交订单                            | clarify     | skill.checkout  |                |                                                  | submitOrder    | confirm-or-deny |
 ```
 
 The example is **shape only**. Replace domain/tool/catalog names with values grounded in the host.
@@ -146,6 +146,11 @@ Then run every gold prompt through the same runtime/model configuration intended
 
 For mutations/navigation, validate the **host state/UI delta**, not only the model's chosen tool name.
 
+Also verify the actual 0.7.x lifecycle: initialize succeeds, the thread is reusable,
+SSE sequence numbers are monotonic/resumable, host Tool correlation ids are
+acknowledged once, Tool trace is visible, and the post-action UI context reflects
+the expected state.
+
 ## 7. Metrics
 
 Calculate and report separately:
@@ -189,14 +194,32 @@ These are recommended product gates, not guaranteed Spotlight results:
 
 If the model/runtime is unavailable, report `LIVE BENCHMARK: NOT RUN` and the exact blocker. Never substitute static checks for these targets.
 
-## 10. Generic list vs named-open contract
+## 10. Dev/production parity gate
 
-| User intent | Preferred Tool class | Forbidden shortcut |
-|---|---|---|
-| list / count / status | read-only `get*` / `list*` | open/play a random entity |
-| open / view / play + named target | explicitly open-like UI Tool | infer a mutation merely because its schema has a string target |
-| mutation + complete args | exact mutation Tool allowed by Skill | generic arbitrary executor |
-| missing target/required arg | clarify | invent an id/name/value |
-| introduction/explanation | knowledge/direct answer | mutate the live page |
+Before release, select at least one representative prompt for every production
+lane and Tool family, including the historically failing ambiguous/entity cases.
+Run each prompt at least 3 times against **both** dev and production using the
+same expected route/Skill/Tool/args assertions.
+
+Record with every result:
+
+- Server version/image digest;
+- frontend build id and manifest version;
+- model provider/model id;
+- Project Pack revision;
+- actual Skill, Tool, normalized argument paths, Tool trace and state delta.
+
+Any dev/prod divergence is a release failure until configuration, manifest, model
+or deployment drift is identified. A single lucky production pass is not proof.
+
+## 11. Generic list vs named-open contract
+
+| User intent                       | Preferred Tool class                 | Forbidden shortcut                                             |
+| --------------------------------- | ------------------------------------ | -------------------------------------------------------------- |
+| list / count / status             | read-only `get*` / `list*`           | open/play a random entity                                      |
+| open / view / play + named target | explicitly open-like UI Tool         | infer a mutation merely because its schema has a string target |
+| mutation + complete args          | exact mutation Tool allowed by Skill | generic arbitrary executor                                     |
+| missing target/required arg       | clarify                              | invent an id/name/value                                        |
+| introduction/explanation          | knowledge/direct answer              | mutate the live page                                           |
 
 This contract is domain-agnostic. Domain vocabulary belongs in the host Skill.
