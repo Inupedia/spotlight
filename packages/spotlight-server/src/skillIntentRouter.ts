@@ -23,6 +23,8 @@ const OPEN_TARGET_VERB_PATTERN =
   /(?:看看|查看|打开|显示|播放|进入|定位|open|show|view|play|navigate to|go to)/iu;
 const OPEN_TOOL_NAME_PATTERN =
   /^(?:open|show|view|play|navigate|select|focus|display|enter|locate)/i;
+const CATALOG_TOOL_DESCRIPTION_PATTERN =
+  /(?:list|catalog|directory|列表|清单|目录)/iu;
 
 function toolsForSkill(
   skill: SpotlightSkill,
@@ -62,6 +64,26 @@ function requiredStringInputKeys(tool: FrontendToolDescriptorV1): string[] {
   return required.filter((key) => properties[key]?.type === "string");
 }
 
+function targetStringInputKey(
+  tool: FrontendToolDescriptorV1,
+): string | undefined {
+  const required = requiredStringInputKeys(tool);
+  if (required.length === 1) return required[0];
+  const properties =
+    tool.inputSchema?.properties &&
+    typeof tool.inputSchema.properties === "object"
+      ? (tool.inputSchema.properties as Record<string, { type?: unknown }>)
+      : {};
+  const stringKeys = Object.entries(properties)
+    .filter(([, schema]) => schema?.type === "string")
+    .map(([key]) => key);
+  const preferred = ["name", "target", "query", "title", "label"];
+  return (
+    preferred.find((key) => stringKeys.includes(key)) ??
+    (stringKeys.length === 1 ? stringKeys[0] : undefined)
+  );
+}
+
 function inferOpenTool(
   skill: SpotlightSkill,
   clientTools: FrontendToolDescriptorV1[],
@@ -72,6 +94,10 @@ function inferOpenTool(
   const explicitlyOpen = tools.filter((tool) =>
     OPEN_TOOL_NAME_PATTERN.test(tool.name),
   );
+  const targetable = explicitlyOpen.filter((tool) =>
+    targetStringInputKey(tool),
+  );
+  if (targetable.length === 1) return targetable[0];
   return explicitlyOpen.length === 1 ? explicitlyOpen[0] : null;
 }
 
@@ -111,9 +137,9 @@ function buildTargetInput(
 ): Record<string, unknown> | undefined {
   const target = extractOpenTargetName(question);
   if (!target) return currentInput;
-  const keys = requiredStringInputKeys(tool);
-  if (keys.length !== 1) return currentInput;
-  return { ...(currentInput ?? {}), [keys[0]]: target };
+  const key = targetStringInputKey(tool);
+  if (!key) return currentInput;
+  return { ...(currentInput ?? {}), [key]: target };
 }
 
 export function enrichSkillToolRoute(
@@ -153,6 +179,7 @@ export function enrichSkillToolRoute(
       const shouldCorrect =
         !selectedTool ||
         selectedTool.sideEffect === "none" ||
+        CATALOG_TOOL_DESCRIPTION_PATTERN.test(selectedTool.description) ||
         !OPEN_TOOL_NAME_PATTERN.test(selectedTool.name);
       if (shouldCorrect || selected === openTool.name) {
         return {

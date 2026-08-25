@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-server",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Deployable LangChain and LangGraph runtime for Inupedia Spotlight",
   "type": "module",
   "license": "MIT",

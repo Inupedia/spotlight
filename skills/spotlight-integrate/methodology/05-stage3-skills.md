@@ -64,6 +64,8 @@ The router receives Tool descriptions, `sideEffect`, risk metadata, and input sc
 
 Do not depend on a Server patch that recognizes this product by name.
 
+When one Skill exposes both a no-argument catalog/list opener and a targetable open/play Tool, make that distinction explicit in their descriptions. Since 0.7.7, a named-target request that the model assigns to the catalog opener is corrected to the single targetable Tool, with the target copied into its preferred string input. This rule is generic and does not replace project catalog search or ambiguity handling.
+
 ## Knowledge Skill
 
 `skill.knowledge`:

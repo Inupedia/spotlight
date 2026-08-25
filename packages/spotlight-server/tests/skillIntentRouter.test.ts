@@ -196,6 +196,58 @@ describe("skill tool route enrichment", () => {
     expect(enriched.toolInput).toEqual({ name: "Main Camera" });
   });
 
+  it("corrects a catalog opener to the targetable player for a named item", () => {
+    const skill = {
+      name: "skill.monitoring",
+      description: "视频监控",
+      allowedTools: ["openVideoMonitoring", "playVideoFullscreen"],
+      responseStrategy: "tool_answer" as const,
+    };
+    const tools = [
+      {
+        name: "openVideoMonitoring",
+        version: "1.0.0",
+        description: "仅打开视频监控列表，不播放具体通道",
+        inputSchema: { type: "object", properties: {} },
+        sideEffect: "ui" as const,
+        replayPolicy: "never" as const,
+        riskLevel: "low" as const,
+      },
+      {
+        name: "playVideoFullscreen",
+        version: "1.0.0",
+        description: "按通道 ID 或名称播放监控",
+        inputSchema: {
+          type: "object",
+          properties: {
+            videoChannelId: { type: "string" },
+            name: { type: "string" },
+          },
+        },
+        sideEffect: "ui" as const,
+        replayPolicy: "never" as const,
+        riskLevel: "low" as const,
+      },
+    ];
+    const enriched = enrichSkillToolRoute(
+      "查看二郎山隧洞项目隧洞洞口",
+      {
+        route: "action",
+        matchedSkillNames: [skill.name],
+        requestedToolNames: ["openVideoMonitoring"],
+        confidence: 0.9,
+        reason: "model selected the catalog opener",
+      },
+      [skill],
+      tools,
+    );
+
+    expect(enriched.requestedToolNames).toEqual(["playVideoFullscreen"]);
+    expect(enriched.toolInput).toEqual({
+      name: "二郎山隧洞项目隧洞洞口",
+    });
+  });
+
   it("keeps list queries on a unique read-only tool", () => {
     const route: SkillRouteResult = {
       route: "action",
