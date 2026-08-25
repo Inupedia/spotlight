@@ -36,7 +36,7 @@ tool-examples: <exact utterance> => <registered Client Tool name>
 
 `allowed-tools` must exactly match registered Client Tool exports.
 
-`capability-examples` are semantic hints and still go through model routing. `tool-examples` are deterministic consumer contracts: after whitespace and punctuation normalization, an exact match selects the bound registered Tool before model routing. Use them sparingly for acceptance-critical or genuinely ambiguous phrases. The Server extracts an explicitly mentioned unique enum value from the Tool schema; missing or invalid required input still goes through the normal clarification fence.
+`capability-examples` are semantic hints and still go through model routing. `tool-examples` are deterministic consumer contracts: after whitespace and punctuation normalization, an exact match selects the bound registered Tool before model routing. Use them for acceptance-critical phrases and genuinely ambiguous sibling Tools. The Server extracts an explicitly mentioned unique enum value directly; since 0.7.6, any remaining required arguments use structured extraction against that one preselected Tool, so the model cannot switch to a sibling Tool. Missing or invalid input still goes through the normal clarification fence.
 
 ## Body: intent-to-tool contract
 

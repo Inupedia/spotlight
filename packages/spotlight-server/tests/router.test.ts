@@ -317,6 +317,65 @@ describe("LangChain intent router", () => {
     });
   });
 
+  it("keeps exact tool selection while using structured extraction for required free-form input", async () => {
+    const model = new FakeToolCallingModel({
+      structuredResponse: {
+        toolName: "openPersonDetail",
+        toolInput: { name: "张三" },
+      },
+    });
+    const router = new LangChainIntentRouter(model);
+    const decision = await router.route(
+      "打开张三的人员详情",
+      [
+        {
+          name: "openPersonDetail",
+          version: "1.0.0",
+          description: "打开人员详情",
+          inputSchema: {
+            type: "object",
+            properties: { name: { type: "string" } },
+            required: ["name"],
+            additionalProperties: false,
+          },
+          sideEffect: "ui",
+          replayPolicy: "never",
+          riskLevel: "low",
+        },
+        {
+          name: "closePersonDetail",
+          version: "1.0.0",
+          description: "关闭人员详情",
+          inputSchema: { type: "object", properties: {} },
+          sideEffect: "ui",
+          replayPolicy: "never",
+          riskLevel: "low",
+        },
+      ],
+      [
+        {
+          name: "skill.onsite",
+          description: "人员详情操作",
+          allowedTools: ["openPersonDetail", "closePersonDetail"],
+          responseStrategy: "tool_answer",
+          toolExamples: [
+            {
+              example: "打开张三的人员详情",
+              toolName: "openPersonDetail",
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(decision).toMatchObject({
+      route: "action",
+      requestedToolNames: ["openPersonDetail"],
+      requestedToolInput: { name: "张三" },
+      matchedSkillNames: ["skill.onsite"],
+    });
+  });
+
   it("infers a read-only tool when the skill route omits requestedToolNames", async () => {
     const model = new FakeToolCallingModel({
       structuredResponse: {

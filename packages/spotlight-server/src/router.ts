@@ -314,6 +314,39 @@ export interface IntentRouter {
 export class LangChainIntentRouter implements IntentRouter {
   constructor(private readonly model: BaseChatModel) {}
 
+  private async completeExactToolRoute(
+    question: string,
+    skills: SpotlightSkill[],
+    clientTools: FrontendToolDescriptorV1[],
+    route: SkillRouteResult,
+  ): Promise<SkillRouteResult> {
+    const toolName = route.requestedToolNames[0];
+    const tool = clientTools.find((item) => item.name === toolName);
+    if (!tool) return route;
+    const required = Array.isArray(tool.inputSchema?.required)
+      ? tool.inputSchema.required.filter(
+          (field): field is string => typeof field === "string",
+        )
+      : [];
+    const missing = required.filter(
+      (field) => !hasUsableRequiredValue(route.toolInput?.[field]),
+    );
+    if (missing.length === 0) return route;
+    const matchedSkill = skills.find((skill) =>
+      route.matchedSkillNames.includes(skill.name),
+    );
+    if (!matchedSkill) return route;
+    const selected = await this.selectSkillTool(question, matchedSkill, [tool]);
+    return {
+      ...route,
+      requestedToolNames: [tool.name],
+      toolInput: {
+        ...(selected.requestedToolInput ?? {}),
+        ...(route.toolInput ?? {}),
+      },
+    };
+  }
+
   private async selectSkillTool(
     question: string,
     skill: SpotlightSkill,
@@ -471,11 +504,17 @@ export class LangChainIntentRouter implements IntentRouter {
         skills,
       );
       if (exactToolRoute) {
-        const decision = await this.decisionFromSkillRoute(
+        const completedExactToolRoute = await this.completeExactToolRoute(
           question,
           skills,
           clientTools,
           exactToolRoute,
+        );
+        const decision = await this.decisionFromSkillRoute(
+          question,
+          skills,
+          clientTools,
+          completedExactToolRoute,
         );
         return applyIntentSafetyFence(
           question,
