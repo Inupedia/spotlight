@@ -122,6 +122,13 @@ export interface SpotlightServerTool {
   invoke(input: Record<string, unknown>, context: RunContext): Promise<unknown>;
 }
 
+export interface SpotlightNamedTargetCatalog {
+  skillName: string;
+  toolName: string;
+  inputKey: string;
+  targets: Array<{ id: string; name: string; aliases: string[] }>;
+}
+
 export interface ProjectPack {
   projectId: string;
   systemPrompt?: string;
@@ -131,6 +138,12 @@ export interface ProjectPack {
   serverTools: SpotlightServerTool[];
   uiPrompts?: Record<string, unknown>;
   videoChannels?: Array<{ id: string; name: string; aliases: string[] }>;
+  /**
+   * Compact, server-side catalogs used to resolve named UI targets before the
+   * LLM router. This keeps large target sets out of prompts while making exact
+   * names and aliases deterministic.
+   */
+  namedTargetCatalogs?: SpotlightNamedTargetCatalog[];
 }
 
 export interface HostActionCall {

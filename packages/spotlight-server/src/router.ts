@@ -13,9 +13,11 @@ import { attachKnowledgeSource } from "./knowledgeSource.js";
 import {
   candidateToolsForSkillRoute,
   routeViaExactToolExample,
+  routeViaNamedTargetCatalog,
   routeViaSkillCatalog,
   type SkillRouteResult,
 } from "./skillIntentRouter.js";
+import type { SpotlightNamedTargetCatalog } from "./contracts.js";
 import { normalizeClientToolInputDetailed } from "./tools.js";
 
 const intentSchema = z.object({
@@ -312,7 +314,12 @@ export interface IntentRouter {
 }
 
 export class LangChainIntentRouter implements IntentRouter {
-  constructor(private readonly model: BaseChatModel) {}
+  constructor(
+    private readonly model: BaseChatModel,
+    private readonly options: {
+      namedTargetCatalogs?: SpotlightNamedTargetCatalog[];
+    } = {},
+  ) {}
 
   private async completeExactToolRoute(
     question: string,
@@ -498,6 +505,24 @@ export class LangChainIntentRouter implements IntentRouter {
     }
 
     if (skills.length > 0) {
+      const namedTargetRoute = routeViaNamedTargetCatalog(
+        question,
+        clientTools,
+        skills,
+        this.options.namedTargetCatalogs ?? [],
+      );
+      if (namedTargetRoute) {
+        const decision = await this.decisionFromSkillRoute(
+          question,
+          skills,
+          clientTools,
+          namedTargetRoute,
+        );
+        return applyIntentSafetyFence(
+          question,
+          applyToolInputCompletenessFence(decision, clientTools),
+        );
+      }
       const exactToolRoute = routeViaExactToolExample(
         question,
         clientTools,

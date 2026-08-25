@@ -4,6 +4,7 @@ import type {
   FrontendToolDescriptorV1,
   SpotlightSkill,
 } from "@inupedia/spotlight-protocol";
+import type { SpotlightNamedTargetCatalog } from "./contracts.js";
 import { z } from "zod";
 
 const skillRouteSchema = z.object({
@@ -329,6 +330,56 @@ export function routeViaExactToolExample(
     toolInput: explicitEnumInput(question, tool),
     confidence: 1,
     reason: `Exact consumer tool example matched ${tool.name}.`,
+  };
+}
+
+export function routeViaNamedTargetCatalog(
+  question: string,
+  clientTools: FrontendToolDescriptorV1[],
+  skills: SpotlightSkill[],
+  catalogs: SpotlightNamedTargetCatalog[],
+): SkillRouteResult | null {
+  if (!hasOpenTargetIntent(question)) return null;
+  const query = relevanceText(question);
+  const skillByName = new Map(skills.map((skill) => [skill.name, skill]));
+  const toolByName = registeredToolMap(clientTools);
+  const matches = catalogs.flatMap((catalog) => {
+    const skill = skillByName.get(catalog.skillName);
+    const tool = toolByName.get(catalog.toolName);
+    if (!skill || !tool || !(skill.allowedTools ?? []).includes(tool.name)) {
+      return [];
+    }
+    return catalog.targets.flatMap((target) => {
+      const variants = [target.name, ...target.aliases]
+        .map((value) => ({ value, normalized: relevanceText(value) }))
+        .filter(({ normalized }) => normalized && query.includes(normalized));
+      const best = variants.sort(
+        (left, right) => right.normalized.length - left.normalized.length,
+      )[0];
+      return best
+        ? [{ catalog, skill, tool, target, score: best.normalized.length }]
+        : [];
+    });
+  });
+  if (matches.length === 0) return null;
+  const bestScore = Math.max(...matches.map((match) => match.score));
+  const best = matches.filter((match) => match.score === bestScore);
+  const targetKeys = new Set(
+    best.map(
+      ({ catalog, target }) =>
+        `${catalog.skillName}:${catalog.toolName}:${target.id}`,
+    ),
+  );
+  if (targetKeys.size !== 1) return null;
+  const match = best[0];
+  if (!match) return null;
+  return {
+    route: "action",
+    matchedSkillNames: [match.skill.name],
+    requestedToolNames: [match.tool.name],
+    toolInput: { [match.catalog.inputKey]: match.target.id },
+    confidence: 1,
+    reason: `Deterministic named target matched ${match.target.id} → ${match.tool.name}.`,
   };
 }
 

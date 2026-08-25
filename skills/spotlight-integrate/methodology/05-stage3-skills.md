@@ -66,6 +66,8 @@ Do not depend on a Server patch that recognizes this product by name.
 
 When one Skill exposes both a no-argument catalog/list opener and a targetable open/play Tool, make that distinction explicit in their descriptions. Since 0.7.7, a named-target request that the model assigns to the catalog opener is corrected to the single targetable Tool, with the target copied into its preferred string input. This rule is generic and does not replace project catalog search or ambiguity handling.
 
+Since 0.7.8, deployable project packs may also provide server-side named-target catalogs. Exact names and aliases are resolved before semantic Skill routing and produce a stable ID input for the bound Tool. Use this for camera channels or other large, dynamic entity sets: keep the catalog out of the LLM prompt, synchronize it from the system of record, and let the frontend Tool resolve only the returned ID.
+
 ## Knowledge Skill
 
 `skill.knowledge`:

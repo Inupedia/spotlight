@@ -72,7 +72,9 @@ export async function main(): Promise<void> {
   const manager = new RunManager({
     project,
     model: createAgentModel(modelConfig),
-    router: new LangChainIntentRouter(createRouterModel(routerConfig)),
+    router: new LangChainIntentRouter(createRouterModel(routerConfig), {
+      namedTargetCatalogs: project.namedTargetCatalogs,
+    }),
     checkpointer: memory.checkpointer,
     store: memory.store,
     memoryGate: packMemory.gate,

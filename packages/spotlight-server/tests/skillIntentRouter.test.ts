@@ -5,6 +5,7 @@ import {
   extractOpenTargetName,
   hasOpenTargetIntent,
   isSkillListQuery,
+  routeViaNamedTargetCatalog,
   type SkillRouteResult,
 } from "../src/skillIntentRouter.js";
 
@@ -155,6 +156,57 @@ const clientTools = [
 ];
 
 describe("skill tool route enrichment", () => {
+  it("locks an exact named catalog target before semantic Skill routing", () => {
+    const skill = {
+      name: "skill.monitoring",
+      description: "视频监控",
+      allowedTools: ["playVideoFullscreen"],
+      responseStrategy: "tool_answer" as const,
+    };
+    const tool = {
+      name: "playVideoFullscreen",
+      version: "1.0.0",
+      description: "按通道 ID 播放监控",
+      inputSchema: {
+        type: "object",
+        properties: { videoChannelId: { type: "string" } },
+      },
+      sideEffect: "ui" as const,
+      replayPolicy: "never" as const,
+      riskLevel: "low" as const,
+    };
+
+    expect(
+      routeViaNamedTargetCatalog(
+        "查看二郎山隧洞项目隧洞洞口",
+        [tool],
+        [skill],
+        [
+          {
+            skillName: "skill.monitoring",
+            toolName: "playVideoFullscreen",
+            inputKey: "videoChannelId",
+            targets: [
+              {
+                id: "tunnel_entrance",
+                name: "隧洞进口监控",
+                aliases: ["二郎山隧洞项目隧洞洞口"],
+              },
+            ],
+          },
+        ],
+      ),
+    ).toEqual({
+      route: "action",
+      matchedSkillNames: ["skill.monitoring"],
+      requestedToolNames: ["playVideoFullscreen"],
+      toolInput: { videoChannelId: "tunnel_entrance" },
+      confidence: 1,
+      reason:
+        "Deterministic named target matched tunnel_entrance → playVideoFullscreen.",
+    });
+  });
+
   it("extracts named targets without product-specific cleanup", () => {
     expect(extractOpenTargetName("打开 Classic Tee")).toBe("Classic Tee");
     expect(extractMonitorTargetName("查看 Main Camera")).toBe("Main Camera");

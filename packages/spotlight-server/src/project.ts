@@ -131,6 +131,11 @@ export async function loadProjectPack(
   const channelItems = Array.isArray(rawChannels)
     ? rawChannels
     : rawChannels?.videoChannels;
+  const videoChannels = channelItems?.map((item) => ({
+    id: item.id,
+    name: item.name ?? item.label ?? item.id,
+    aliases: item.aliases ?? [],
+  })) ?? extension.videoChannels;
 
   const knowledgeConfig = config.providers?.knowledge;
   const webConfig = config.providers?.webSearch;
@@ -140,12 +145,20 @@ export async function loadProjectPack(
     systemPrompt: systemPrompt ?? extension.systemPrompt,
     serverTools: extension.serverTools ?? [],
     uiPrompts: uiPrompts ?? extension.uiPrompts,
-    videoChannels:
-      channelItems?.map((item) => ({
-        id: item.id,
-        name: item.name ?? item.label ?? item.id,
-        aliases: item.aliases ?? [],
-      })) ?? extension.videoChannels,
+    videoChannels,
+    namedTargetCatalogs: [
+      ...(extension.namedTargetCatalogs ?? []),
+      ...(videoChannels?.length
+        ? [
+            {
+              skillName: "skill.monitoring",
+              toolName: "playVideoFullscreen",
+              inputKey: "videoChannelId",
+              targets: videoChannels,
+            },
+          ]
+        : []),
+    ],
     knowledgeProvider:
       (await registry.createKnowledge(knowledgeConfig)) ??
       extension.knowledgeProvider,
