@@ -153,6 +153,7 @@ when_to_use: 用户询问资源列表、明确要求打开某个资源、或要�
 allowed-tools: getItemList, openItem, updateItem
 spotlight-response-strategy: tool_answer
 capability-examples: 目前有哪些资源, 打开<exact host catalog name>, 把<real field>改为<real value>
+tool-examples: <acceptance-critical exact utterance> => <registeredToolName>
 ---
 
 # 资源

@@ -12,6 +12,7 @@ import {
 import { attachKnowledgeSource } from "./knowledgeSource.js";
 import {
   candidateToolsForSkillRoute,
+  routeViaExactToolExample,
   routeViaSkillCatalog,
   type SkillRouteResult,
 } from "./skillIntentRouter.js";
@@ -464,6 +465,23 @@ export class LangChainIntentRouter implements IntentRouter {
     }
 
     if (skills.length > 0) {
+      const exactToolRoute = routeViaExactToolExample(
+        question,
+        clientTools,
+        skills,
+      );
+      if (exactToolRoute) {
+        const decision = await this.decisionFromSkillRoute(
+          question,
+          skills,
+          clientTools,
+          exactToolRoute,
+        );
+        return applyIntentSafetyFence(
+          question,
+          applyToolInputCompletenessFence(decision, clientTools),
+        );
+      }
       const skillRoute = await routeViaSkillCatalog(
         this.model,
         question,

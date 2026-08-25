@@ -29,9 +29,14 @@ when_to_use: <user intents and exclusions, not implementation detail>
 allowed-tools: getItemList, openItem, addItem
 spotlight-response-strategy: tool_answer
 capability-examples: <host-grounded examples>
+# 0.7.5+: use this only for an exact, stable consumer contract when sibling
+# Skills or Tools can interpret the same wording differently.
+tool-examples: <exact utterance> => <registered Client Tool name>
 ```
 
 `allowed-tools` must exactly match registered Client Tool exports.
+
+`capability-examples` are semantic hints and still go through model routing. `tool-examples` are deterministic consumer contracts: after whitespace and punctuation normalization, an exact match selects the bound registered Tool before model routing. Use them sparingly for acceptance-critical or genuinely ambiguous phrases. The Server extracts an explicitly mentioned unique enum value from the Tool schema; missing or invalid required input still goes through the normal clarification fence.
 
 ## Body: intent-to-tool contract
 

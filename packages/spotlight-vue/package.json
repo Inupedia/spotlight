@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-vue",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "description": "Thin Vue runtime for Inupedia Spotlight Client Tools",
   "type": "module",
   "license": "MIT",

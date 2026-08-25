@@ -254,6 +254,57 @@ function relevanceText(value: string): string {
     .replace(/[\p{P}\p{S}\s]+/gu, "");
 }
 
+function explicitEnumInput(
+  question: string,
+  tool: FrontendToolDescriptorV1,
+): Record<string, unknown> {
+  const query = relevanceText(question);
+  const properties =
+    tool.inputSchema?.properties &&
+    typeof tool.inputSchema.properties === "object"
+      ? (tool.inputSchema.properties as Record<string, { enum?: unknown }>)
+      : {};
+  return Object.fromEntries(
+    Object.entries(properties).flatMap(([key, schema]) => {
+      if (!Array.isArray(schema.enum)) return [];
+      const matches = schema.enum.filter((value) =>
+        query.includes(relevanceText(String(value))),
+      );
+      return matches.length === 1 ? [[key, matches[0]]] : [];
+    }),
+  );
+}
+
+export function routeViaExactToolExample(
+  question: string,
+  clientTools: FrontendToolDescriptorV1[],
+  skills: SpotlightSkill[],
+): SkillRouteResult | null {
+  const query = relevanceText(question);
+  if (!query) return null;
+  const registered = registeredToolMap(clientTools);
+  const matches = skills.flatMap((skill) =>
+    (skill.toolExamples ?? []).flatMap((item) => {
+      if (relevanceText(item.example) !== query) return [];
+      if (!(skill.allowedTools ?? []).includes(item.toolName)) return [];
+      const tool = registered.get(item.toolName);
+      return tool ? [{ skill, tool }] : [];
+    }),
+  );
+  const toolNames = [...new Set(matches.map(({ tool }) => tool.name))];
+  if (toolNames.length !== 1) return null;
+  const tool = matches[0]?.tool;
+  if (!tool) return null;
+  return {
+    route: "action",
+    matchedSkillNames: [...new Set(matches.map(({ skill }) => skill.name))],
+    requestedToolNames: [tool.name],
+    toolInput: explicitEnumInput(question, tool),
+    confidence: 1,
+    reason: `Exact consumer tool example matched ${tool.name}.`,
+  };
+}
+
 function relevanceScore(question: string, example: string): number {
   const query = relevanceText(question);
   const candidate = relevanceText(example);

@@ -261,6 +261,62 @@ describe("LangChain intent router", () => {
     expect(decision.matchedSkillNames).toEqual(["skill.progress.filters"]);
   });
 
+  it("routes an exact consumer tool example deterministically and extracts enum input", async () => {
+    const model = new FakeToolCallingModel({
+      structuredResponse: {
+        route: "clarify",
+        matchedSkillNames: [],
+        requestedToolNames: [],
+        confidence: 1,
+        reason: "This response must not override an exact tool example.",
+      },
+    });
+    const router = new LangChainIntentRouter(model);
+    const decision = await router.route(
+      "查看 2024 年质量数据",
+      [
+        {
+          name: "selectQualityYear",
+          version: "1.0.0",
+          description: "切换质量年份",
+          inputSchema: {
+            type: "object",
+            properties: {
+              year: { type: "string", enum: ["2023", "2024", "2025"] },
+            },
+            required: ["year"],
+            additionalProperties: false,
+          },
+          sideEffect: "ui",
+          replayPolicy: "never",
+          riskLevel: "low",
+        },
+      ],
+      [
+        {
+          name: "skill.progress.filters",
+          description: "质量筛选",
+          allowedTools: ["selectQualityYear"],
+          responseStrategy: "tool_answer",
+          toolExamples: [
+            {
+              example: "查看2024年质量数据",
+              toolName: "selectQualityYear",
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(decision).toMatchObject({
+      route: "action",
+      requestedToolNames: ["selectQualityYear"],
+      requestedToolInput: { year: "2024" },
+      matchedSkillNames: ["skill.progress.filters"],
+      confidence: 1,
+    });
+  });
+
   it("infers a read-only tool when the skill route omits requestedToolNames", async () => {
     const model = new FakeToolCallingModel({
       structuredResponse: {
