@@ -8,7 +8,6 @@ import type {
   SpotlightKnowledgeSearchItem,
   ToolSideEffectV1,
 } from "@inupedia/spotlight-protocol";
-import { serializeSkillsForRemote } from "@inupedia/spotlight-client";
 import { useAgentSessionStore } from "../session/agentSession.js";
 import { useSpotlightMemoryPreferenceStore } from "../store/memoryPreferenceStore.js";
 import { useSpotlightRuntimeStore } from "../store/runtimeStore.js";
@@ -26,7 +25,6 @@ import type { HandlerApi } from "../store/pipeline/types.js";
 import type { AgentStep, AgentStepToolCall } from "../store/types.js";
 import type { SpotlightExecutionEvent } from "../store/runtime/types.js";
 import { getSpotlightAppClient, getSpotlightConfig } from "../plugin.js";
-import { getSkillsPoolForRun } from "../skills/index.js";
 import {
   ensureHostToolsManifest,
   executeRemoteHostTool,
@@ -870,11 +868,6 @@ async function buildRemotePayload(
         resumableAction: runtime.resumableAction,
         lastResolvedTarget: runtime.lastResolvedTarget,
       },
-      clientToolsManifestVersion: hostManifest.manifestDigest,
-      clientToolManifest: hostManifest,
-      skills: serializeSkillsForRemote(getSkillsPoolForRun()),
-      frontendBuildId: hostManifest.frontendBuildId,
-      manifestDigest: hostManifest.manifestDigest,
     },
   };
 }
@@ -924,9 +917,24 @@ export async function runRemoteSpotlightPipeline(
         input: event.item.arguments,
         displayName: event.item.displayName,
       };
-      const result = await executeRemoteHostTool(call, api, {
-        allowedHostNames,
-      });
+      const approvalRequired = event.item.clientRequest.approvalRequired === true;
+      const approved = !approvalRequired || Boolean(
+        await getSpotlightConfig().approveTool?.({
+          name: call.name,
+          displayName: call.displayName,
+          input: call.input,
+          reason: event.item.clientRequest.approvalReason,
+        }),
+      );
+      const result: import("../types/toolResult.js").ToolResult<unknown> = approved
+        ? await executeRemoteHostTool(call, api, { allowedHostNames })
+        : {
+            success: false as const,
+            error: "Tool execution was not approved",
+            errorCode: "TOOL_APPROVAL_REQUIRED",
+            trace: [],
+            executionTarget: "host" as const,
+          };
       settleHostToolCall(api, call, result, lookup);
       await client.submitToolResult(turn.id, {
         correlationId: event.item.clientRequest.correlationId,

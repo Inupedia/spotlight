@@ -5,6 +5,39 @@ export interface SpotlightClientConfig {
   projectId: string;
 }
 
+export class SpotlightHttpError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly code?: string,
+    readonly retryable?: boolean,
+    readonly details?: unknown,
+  ) {
+    super(message);
+    this.name = "SpotlightHttpError";
+  }
+}
+
+function responseError(method: string, path: string, status: number, text: string) {
+  let parsed: {
+    error?: { code?: string; message?: string; retryable?: boolean; details?: unknown };
+    message?: string;
+  } = {};
+  try {
+    parsed = JSON.parse(text) as typeof parsed;
+  } catch {
+    // Non-JSON reverse-proxy errors still receive a useful fallback below.
+  }
+  const error = parsed.error;
+  return new SpotlightHttpError(
+    error?.message ?? parsed.message ?? `Spotlight ${method} ${path} failed: ${status}`,
+    status,
+    error?.code,
+    error?.retryable,
+    error?.details,
+  );
+}
+
 export function normalizeServerUrl(url: string): string {
   return url.replace(/\/$/, "");
 }
@@ -54,7 +87,7 @@ export function createSpotlightHttp(config: SpotlightClientConfig) {
       });
       const text = await res.text().catch(() => "");
       if (!res.ok) {
-        throw new Error(`Spotlight GET ${path} failed: ${res.status} ${text}`);
+        throw responseError("GET", path, res.status, text);
       }
       return JSON.parse(text) as T;
     },
@@ -71,7 +104,7 @@ export function createSpotlightHttp(config: SpotlightClientConfig) {
       });
       const text = await res.text().catch(() => "");
       if (!res.ok) {
-        throw new Error(`Spotlight POST ${path} failed: ${res.status} ${text}`);
+        throw responseError("POST", path, res.status, text);
       }
       return JSON.parse(text) as T;
     },

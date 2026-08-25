@@ -215,11 +215,11 @@ export function clientToolTier(tool: FrontendToolDescriptorV1): ToolTierV1 {
   return deriveToolTier(tool);
 }
 
-/** Only replay-safe tiers can be dispatched; `mutate` has no broker behind it yet. */
+/** Mutations are accepted only when explicitly marked for confirmation. */
 export function isDispatchableClientTool(
   tool: FrontendToolDescriptorV1,
 ): boolean {
-  return isToolTierReplaySafe(clientToolTier(tool));
+  return isToolTierReplaySafe(clientToolTier(tool)) || tool.requiresConfirmation === true;
 }
 
 export class UnsupportedToolTierError extends Error {
@@ -239,16 +239,18 @@ export class UnsupportedToolTierError extends Error {
 }
 
 /**
- * Registration-time gate. Every capability the runtime accepts must be one it can
- * re-dispatch after a lost connection, because re-dispatch is the only recovery
- * mechanism that exists today.
+ * Registration-time gate. Non-replayable Tools must be explicit approval
+ * boundaries; the runtime dispatches those at most once.
  */
 export function assertRegisterableClientTools(
   tools: readonly FrontendToolDescriptorV1[],
 ): void {
   const rejected = tools
-    .map((tool) => ({ name: tool.name, tier: clientToolTier(tool) }))
-    .filter((entry) => !isToolTierReplaySafe(entry.tier));
+    .filter((tool) =>
+      !isToolTierReplaySafe(clientToolTier(tool)) &&
+      tool.requiresConfirmation !== true,
+    )
+    .map((tool) => ({ name: tool.name, tier: clientToolTier(tool) }));
   if (rejected.length > 0) throw new UnsupportedToolTierError(rejected);
 }
 

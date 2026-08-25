@@ -58,6 +58,11 @@ export function buildSessionContext(request: CreateRunRequest): SessionContext {
     ? `最近对话：\n${recentTurns.map(summarizeTurn).join("\n")}`
     : "";
   const fullContextText = [summaryText, recentTurnsText]
+    .concat(
+      Object.entries(request.additionalContext ?? {}).map(([name, entry]) =>
+        `${entry.kind === "untrusted" ? "Untrusted" : "Application"} context (${name}):\n${entry.value}`,
+      ),
+    )
     .filter(Boolean)
     .join("\n\n");
 

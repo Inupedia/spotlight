@@ -3,13 +3,16 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { parse } from "yaml";
 import type { ProjectPack, SpotlightServerTool } from "./contracts.js";
-import { HikariSearchProvider } from "./providers/hikari.js";
-import { YuxiKnowledgeProvider } from "./providers/yuxi.js";
+import {
+  createDefaultProviderRegistry,
+  type SpotlightProviderConfig,
+  type SpotlightProviderRegistry,
+} from "./providerRegistry.js";
 import { assertServerToolMetadata } from "./safety.js";
 
-interface ProviderConfig {
+interface ProviderConfig extends SpotlightProviderConfig {
   type: string;
-  baseUrl: string;
+  baseUrl?: string;
   token?: string;
   apiKey?: string;
   username?: string;
@@ -36,6 +39,7 @@ type ProjectModule = {
   createProjectPack?: () => Partial<ProjectPack> | Promise<Partial<ProjectPack>>;
   serverTools?: SpotlightServerTool[];
   createServerTools?: () => SpotlightServerTool[] | Promise<SpotlightServerTool[]>;
+  registerProviders?: (registry: SpotlightProviderRegistry) => void | Promise<void>;
 };
 
 function interpolateEnvironment(source: string): string {
@@ -71,12 +75,16 @@ async function modulePack(imported: ProjectModule | null): Promise<Partial<Proje
   return { ...fromFactory, serverTools: tools };
 }
 
-export async function loadProjectPack(configPath: string): Promise<ProjectPack> {
+export async function loadProjectPack(
+  configPath: string,
+  registry: SpotlightProviderRegistry = createDefaultProviderRegistry(),
+): Promise<ProjectPack> {
   const raw = interpolateEnvironment(await readFile(configPath, "utf8"));
   const config = parse(raw) as ProjectConfigFile;
   if (!config?.projectId) throw new Error("spotlight.project.yml requires projectId");
 
   const imported = await loadModule(configPath, config.module);
+  await imported?.registerProviders?.(registry);
   const extension = await modulePack(imported);
   const systemPrompt = config.systemPromptFile
     ? await readFile(localPath(configPath, config.systemPromptFile), "utf8")
@@ -103,30 +111,10 @@ export async function loadProjectPack(configPath: string): Promise<ProjectPack> 
         aliases: item.aliases ?? [],
       })) ?? extension.videoChannels,
     knowledgeProvider:
-      knowledgeConfig?.type === "yuxi"
-        ? new YuxiKnowledgeProvider({
-            baseUrl: knowledgeConfig.baseUrl,
-            apiKey: knowledgeConfig.apiKey,
-            username: knowledgeConfig.username,
-            password: knowledgeConfig.password,
-            agentSlug: knowledgeConfig.agentSlug,
-          })
-        : extension.knowledgeProvider,
+      (await registry.createKnowledge(knowledgeConfig)) ?? extension.knowledgeProvider,
     webSearchProvider:
-      webConfig?.type === "hikari"
-        ? new HikariSearchProvider({
-            baseUrl: webConfig.baseUrl,
-            token: webConfig.token ?? "",
-            maxAttempts: webConfig.maxAttempts,
-          })
-        : extension.webSearchProvider,
+      (await registry.createWebSearch(webConfig)) ?? extension.webSearchProvider,
   };
-  if (knowledgeConfig && knowledgeConfig.type !== "yuxi" && !extension.knowledgeProvider) {
-    throw new Error(`Unknown knowledge provider: ${knowledgeConfig.type}`);
-  }
-  if (webConfig && webConfig.type !== "hikari" && !extension.webSearchProvider) {
-    throw new Error(`Unknown web search provider: ${webConfig.type}`);
-  }
   for (const item of pack.serverTools) assertServerToolMetadata(item);
   return pack;
 }

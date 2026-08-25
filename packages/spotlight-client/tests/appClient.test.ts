@@ -40,6 +40,13 @@ describe("SpotlightAppClient", () => {
         serverInfo: { name: "@inupedia/spotlight-server", version: "1", runtime: "langchain-langgraph" },
         projectId: "demo",
         acceptedManifestDigest: "digest",
+        capabilitySession: {
+          id: "capability-1",
+          projectId: "demo",
+          manifestDigest: "digest",
+          createdAt: 1,
+          expiresAt: 2,
+        },
         capabilities: { transports: ["sse"], cancellation: true, threadResume: true, eventReplay: true },
         tools: [],
         skills: [],
@@ -73,5 +80,9 @@ describe("SpotlightAppClient", () => {
     expect(seen).toEqual(["turn.started", "turn.completed"]);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls[0]?.[0]).toBe("http://spotlight.test/v1/initialize");
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toMatchObject({
+      capabilitySessionId: "capability-1",
+      input: "你好",
+    });
   });
 });

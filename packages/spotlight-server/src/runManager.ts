@@ -11,6 +11,10 @@ import type {
   SpotlightRunSummary,
   ToolTraceEvent,
 } from "@inupedia/spotlight-protocol";
+import {
+  deriveToolTier,
+  isToolTierReplaySafe,
+} from "@inupedia/spotlight-protocol";
 import type { MemoryGate } from "@inupedia/spotlight-memory/node";
 import type {
   HostActionBridge,
@@ -39,6 +43,14 @@ import {
 } from "./workflow/sessionContext.js";
 import { initialRuntimeState } from "./workflow/state.js";
 import type { IntentRouter } from "./router.js";
+import type { SpotlightDurableState } from "./durableState.js";
+import { SpotlightPolicyEngine } from "./policy.js";
+import {
+  prepareRunContext,
+  structuredOutputQuestion,
+  validateStructuredOutput,
+  type SpotlightContextMetrics,
+} from "./contextBudget.js";
 
 export type SpotlightServerRunEventBody =
   | {
@@ -72,6 +84,8 @@ export type SpotlightServerRunEventBody =
         call: HostActionCall;
         /** >1 means this call is being re-dispatched after a lost connection. */
         dispatch: number;
+        approvalRequired?: boolean;
+        approvalReason?: string;
       };
     }
   | {
@@ -136,6 +150,9 @@ interface PendingHostAction {
   connectedMs: number;
   startedAt: number;
   dispatches: number;
+  replaySafe: boolean;
+  approvalRequired: boolean;
+  approvalReason?: string;
 }
 
 interface RunState {
@@ -156,6 +173,8 @@ interface RunState {
   hostRedispatches: number;
   matchedSkillNames: string[];
   watchdog: NodeJS.Timeout | null;
+  contextMetrics: SpotlightContextMetrics;
+  outputCharacters: number;
 }
 
 export interface RunManagerOptions {
@@ -170,6 +189,8 @@ export interface RunManagerOptions {
   /** Total wall-clock budget for a host call, including time spent disconnected. */
   hostActionMaxWaitMs?: number;
   runTtlMs?: number;
+  durableState?: SpotlightDurableState;
+  maxContextCharacters?: number;
 }
 
 const HOST_WATCHDOG_TICK_MS = 500;
@@ -180,6 +201,7 @@ export class RunManager {
   private readonly runsBySession = new Map<string, Set<string>>();
   /** Ids of runs that finished and aged out, so the API can answer 410 not 404. */
   private readonly expired = new Set<string>();
+  private readonly policy = new SpotlightPolicyEngine();
 
   constructor(private readonly options: RunManagerOptions) {}
 
@@ -192,7 +214,19 @@ export class RunManager {
     ];
   }
 
+  providerIds(): { knowledge: string | null; webSearch: string | null } {
+    return {
+      knowledge: this.options.project.knowledgeProvider?.id ?? null,
+      webSearch: this.options.project.webSearchProvider?.id ?? null,
+    };
+  }
+
   createRun(request: RunRequest): { id: string } {
+    const prepared = prepareRunContext(
+      request,
+      this.options.maxContextCharacters,
+    );
+    request = prepared.request;
     const id = crypto.randomUUID();
     const sessionId = request.sessionId?.trim() || null;
     const run: RunState = {
@@ -213,12 +247,24 @@ export class RunManager {
       hostRedispatches: 0,
       matchedSkillNames: [],
       watchdog: null,
+      contextMetrics: prepared.metrics,
+      outputCharacters: 0,
     };
     this.runs.set(id, run);
     if (sessionId) {
       const bucket = this.runsBySession.get(sessionId) ?? new Set<string>();
       bucket.add(id);
       this.runsBySession.set(sessionId, bucket);
+    }
+    if (sessionId) {
+      this.options.durableState?.startTurn({
+        id,
+        threadId: sessionId,
+        request: structuredClone(request),
+        startedAt: run.startedAt,
+        status: "in_progress",
+        events: [],
+      });
     }
     queueMicrotask(() => void this.execute(run));
     return { id };
@@ -292,6 +338,7 @@ export class RunManager {
     run.seq += 1;
     const event = { ...body, seq: run.seq } as SpotlightServerRunEvent;
     run.events.push(event);
+    this.options.durableState?.appendTurnEvent(run.id, event);
     for (const listener of run.subscribers) listener(event);
   }
 
@@ -319,6 +366,11 @@ export class RunManager {
     }
     run.pending.clear();
     this.emit(run, body);
+    this.options.durableState?.finishTurn(
+      run.id,
+      body.type === "run_completed" ? "completed" : "failed",
+      body.type === "run_completed" ? body.assistantReply : undefined,
+    );
     const timer = setTimeout(
       () => this.retire(run),
       this.options.runTtlMs ?? 10 * 60_000,
@@ -344,6 +396,18 @@ export class RunManager {
     return {
       request: (call) =>
         new Promise<HostToolResultRequest>((resolve, reject) => {
+          const descriptor = run.request.clientToolManifest?.tools.find(
+            (tool) => tool.name === call.name,
+          );
+          if (!descriptor) {
+            reject(new Error(`TOOL_NOT_REGISTERED: ${call.name}`));
+            return;
+          }
+          const decision = this.policy.evaluate(descriptor, run.request.policy);
+          if (decision.action === "deny") {
+            reject(new Error(`TOOL_POLICY_DENIED: ${decision.reason}`));
+            return;
+          }
           const correlationId = crypto.randomUUID();
           run.pending.set(correlationId, {
             correlationId,
@@ -353,6 +417,9 @@ export class RunManager {
             connectedMs: 0,
             startedAt: Date.now(),
             dispatches: 0,
+            replaySafe: isToolTierReplaySafe(deriveToolTier(descriptor)),
+            approvalRequired: decision.action === "require_approval",
+            approvalReason: decision.action === "require_approval" ? decision.reason : undefined,
           });
           this.startWatchdog(run);
           this.dispatchHostAction(run, correlationId);
@@ -374,6 +441,8 @@ export class RunManager {
         correlationId,
         call: pending.call,
         dispatch: pending.dispatches,
+        approvalRequired: pending.approvalRequired,
+        approvalReason: pending.approvalReason,
       },
     });
   }
@@ -391,6 +460,7 @@ export class RunManager {
     }
     for (const pending of run.pending.values()) {
       if (pending.dispatches === 0) continue;
+      if (!pending.replaySafe) continue;
       this.dispatchHostAction(run, pending.correlationId);
     }
   }
@@ -470,6 +540,12 @@ export class RunManager {
       hostDispatches: run.hostDispatches,
       hostRedispatches: run.hostRedispatches,
       elapsedMs: Date.now() - run.startedAt,
+      inputTokens: run.contextMetrics.estimatedInputTokens,
+      outputTokens: Math.ceil(run.outputCharacters / 4),
+      totalTokens:
+        run.contextMetrics.estimatedInputTokens + Math.ceil(run.outputCharacters / 4),
+      contextCharacters: run.contextMetrics.characters,
+      contextCompacted: run.contextMetrics.compacted,
     };
   }
 
@@ -614,7 +690,7 @@ export class RunManager {
       const priorState = await graph.getState(runConfig);
       const checkpointMessageCount = priorState?.values?.messages?.length ?? 0;
       const messages = initialMessagesForRun(
-        run.request.userQuestion,
+        structuredOutputQuestion(run.request.userQuestion, run.request.outputSchema),
         sessionContext,
         checkpointMessageCount,
       );
@@ -632,7 +708,10 @@ export class RunManager {
           values.lane,
           values.invokedClientTools ?? [],
         ),
-        assistantReply: values.assistantReply,
+        assistantReply: validateStructuredOutput(
+          values.assistantReply,
+          run.request.outputSchema,
+        ),
         decision: values.decision,
         invokedClientTools: values.invokedClientTools ?? [],
       };
@@ -659,6 +738,7 @@ export class RunManager {
         iteration: run.step,
         content: result.assistantReply,
       });
+      run.outputCharacters = result.assistantReply.length;
       this.finish(run, {
         type: "run_completed",
         at: Date.now(),

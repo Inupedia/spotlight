@@ -1,9 +1,12 @@
 import {
   SPOTLIGHT_APP_PROTOCOL_V1,
   defaultSpotlightClientCapabilities,
+  spotlightSkillToolNames,
   type FrontendToolManifestV1,
   type HostToolResultRequest,
   type SpotlightInitializeResponse,
+  type SpotlightItem,
+  type SpotlightSkill,
   type SpotlightSkillRegistration,
   type SpotlightThread,
   type SpotlightTurn,
@@ -14,13 +17,39 @@ import {
   buildJsonHeaders,
   createSpotlightHttp,
   type SpotlightClientConfig,
+  SpotlightHttpError,
 } from "./http.js";
+import {
+  createClientToolManifest,
+  createClientToolRegistry,
+  type ClientTool,
+} from "./clientTool.js";
 
 export interface SpotlightAppClientOptions extends SpotlightClientConfig {
-  toolManifest:
+  toolManifest?:
     | FrontendToolManifestV1
     | (() => FrontendToolManifestV1 | Promise<FrontendToolManifestV1>);
-  skills?: SpotlightSkillRegistration[] | (() => SpotlightSkillRegistration[]);
+  /** Preferred: register Tools and let the SDK derive and snapshot the manifest. */
+  tools?: readonly ClientTool[] | (() => readonly ClientTool[]);
+  frontendBuildId?: string;
+  skills?:
+    | Array<SpotlightSkill | SpotlightSkillRegistration>
+    | (() => Array<SpotlightSkill | SpotlightSkillRegistration>);
+  executeTool?: (request: {
+    turnId: string;
+    item: Extract<SpotlightItem, { type: "tool_call" }>;
+  }) => Promise<{
+    success: boolean;
+    output?: unknown;
+    error?: string;
+    trace?: HostToolResultRequest["trace"];
+    uiContext?: HostToolResultRequest["uiContext"];
+  }>;
+  approveTool?: (request: {
+    turnId: string;
+    item: Extract<SpotlightItem, { type: "tool_call" }>;
+    reason?: string;
+  }) => boolean | Promise<boolean>;
   clientInfo?: {
     name?: string;
     title?: string;
@@ -30,6 +59,52 @@ export interface SpotlightAppClientOptions extends SpotlightClientConfig {
 
 function valueOf<T>(value: T | (() => T)): T {
   return typeof value === "function" ? (value as () => T)() : value;
+}
+
+function normalizeSkills(
+  skills: Array<SpotlightSkill | SpotlightSkillRegistration>,
+): { registrations: SpotlightSkillRegistration[]; definitions: SpotlightSkill[] } {
+  const definitions = skills.map((skill) => {
+    const candidate = skill as SpotlightSkill & SpotlightSkillRegistration;
+    return {
+      ...candidate,
+      policy: candidate.policy ?? {
+        allowImplicitInvocation: candidate.allowImplicitInvocation !== false,
+      },
+    } satisfies SpotlightSkill;
+  });
+  return {
+    definitions,
+    registrations: definitions.map((skill) => ({
+      name: skill.name,
+      displayName: skill.interface?.displayName ?? skill.displayName,
+      description: skill.description,
+      version: skill.version,
+      allowImplicitInvocation:
+        skill.policy?.allowImplicitInvocation ?? skill.disableModelInvocation !== true,
+      userInvocable: skill.userInvocable,
+      dependencies: { tools: spotlightSkillToolNames(skill) },
+    })),
+  };
+}
+
+export interface SpotlightRunResult {
+  thread: SpotlightThread;
+  turn: SpotlightTurn;
+  events: SpotlightTurnEvent[];
+  items: SpotlightItem[];
+  finalResponse: string;
+  summary?: Extract<SpotlightTurnEvent, { type: "turn.completed" }>["summary"];
+}
+
+export interface SpotlightRunOptions extends Omit<SpotlightTurnStartRequest, "input"> {
+  signal?: AbortSignal;
+  threadId?: string;
+}
+
+export interface SpotlightThreadHandle {
+  readonly id: string | undefined;
+  run(input: string, options?: Omit<SpotlightRunOptions, "threadId">): Promise<SpotlightRunResult>;
 }
 
 async function asyncValueOf<T>(
@@ -77,17 +152,36 @@ export class SpotlightAppClient {
   private readonly http;
   private initialization: Promise<SpotlightInitializeResponse> | null = null;
   private initializedDigest: string | null = null;
+  private capabilitySessionId: string | null = null;
+  private toolRegistry: ReturnType<typeof createClientToolRegistry> | null = null;
 
   constructor(private readonly options: SpotlightAppClientOptions) {
     this.http = createSpotlightHttp(options);
   }
 
+  private async manifest(): Promise<FrontendToolManifestV1> {
+    if (this.options.toolManifest) return asyncValueOf(this.options.toolManifest);
+    if (!this.options.tools) {
+      throw new Error("Spotlight requires tools or toolManifest");
+    }
+    const tools = valueOf(this.options.tools);
+    this.toolRegistry = createClientToolRegistry(tools);
+    return createClientToolManifest({
+      projectId: this.options.projectId,
+      frontendBuildId: this.options.frontendBuildId?.trim() || "development",
+      tools,
+    });
+  }
+
   async initialize(signal?: AbortSignal): Promise<SpotlightInitializeResponse> {
-    const manifest = await asyncValueOf(this.options.toolManifest);
+    const manifest = await this.manifest();
     if (this.initialization && this.initializedDigest === manifest.manifestDigest) {
       return this.initialization;
     }
     this.initializedDigest = manifest.manifestDigest;
+    const normalizedSkills = normalizeSkills(
+      this.options.skills ? valueOf(this.options.skills) : [],
+    );
     this.initialization = this.http.postJson<SpotlightInitializeResponse>(
       "/v1/initialize",
       {
@@ -96,15 +190,20 @@ export class SpotlightAppClient {
         clientInfo: {
           name: this.options.clientInfo?.name ?? "spotlight-typescript",
           title: this.options.clientInfo?.title,
-          version: this.options.clientInfo?.version ?? "0.7.0",
+          version: this.options.clientInfo?.version ?? "0.7.1",
         },
         capabilities: defaultSpotlightClientCapabilities(),
         toolManifest: manifest,
-        skills: this.options.skills ? valueOf(this.options.skills) : [],
+        skills: normalizedSkills.registrations,
+        skillDefinitions: normalizedSkills.definitions,
       },
       signal,
-    ).catch((error) => {
+    ).then((response) => {
+      this.capabilitySessionId = response.capabilitySession.id;
+      return response;
+    }).catch((error) => {
       this.initialization = null;
+      this.capabilitySessionId = null;
       throw error;
     });
     return this.initialization;
@@ -120,18 +219,119 @@ export class SpotlightAppClient {
     return response.thread;
   }
 
+  thread(threadId?: string): SpotlightThreadHandle {
+    let resolvedId = threadId;
+    return {
+      get id() {
+        return resolvedId;
+      },
+      run: async (input, options = {}) => {
+        const result = await this.run(input, { ...options, threadId: resolvedId });
+        resolvedId = result.thread.id;
+        return result;
+      },
+    };
+  }
+
+  async listThreads(signal?: AbortSignal): Promise<SpotlightThread[]> {
+    const response = await this.http.getJson<{ threads: SpotlightThread[] }>(
+      "/v1/threads",
+      signal,
+    );
+    return response.threads;
+  }
+
+  async forkThread(threadId: string, signal?: AbortSignal): Promise<SpotlightThread> {
+    const response = await this.http.postJson<{ thread: SpotlightThread }>(
+      `/v1/threads/${encodeURIComponent(threadId)}/fork`,
+      {},
+      signal,
+    );
+    return response.thread;
+  }
+
   async startTurn(
     threadId: string,
     request: SpotlightTurnStartRequest,
     signal?: AbortSignal,
   ): Promise<SpotlightTurn> {
     await this.initialize(signal);
-    const response = await this.http.postJson<{ turn: SpotlightTurn }>(
+    const start = () => this.http.postJson<{ turn: SpotlightTurn }>(
       `/v1/threads/${encodeURIComponent(threadId)}/turns`,
-      request,
+      { ...request, capabilitySessionId: request.capabilitySessionId ?? this.capabilitySessionId },
       signal,
     );
-    return response.turn;
+    try {
+      return (await start()).turn;
+    } catch (error) {
+      if (!(error instanceof SpotlightHttpError) || error.code !== "CAPABILITY_SESSION_EXPIRED") {
+        throw error;
+      }
+      this.initialization = null;
+      this.capabilitySessionId = null;
+      await this.initialize(signal);
+      return (await start()).turn;
+    }
+  }
+
+  async run(
+    input: string,
+    options: SpotlightRunOptions = {},
+  ): Promise<SpotlightRunResult> {
+    const { signal, threadId, ...request } = options;
+    const thread = await this.startThread(threadId, signal);
+    const turn = await this.startTurn(thread.id, { ...request, input }, signal);
+    const events: SpotlightTurnEvent[] = [];
+    const items = new Map<string, SpotlightItem>();
+    const submitted = new Set<string>();
+    let finalResponse = "";
+    let summary: SpotlightRunResult["summary"];
+    for await (const event of this.streamTurn(turn.id, signal)) {
+      events.push(event);
+      if (event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed") {
+        items.set(event.item.id, event.item);
+        const clientRequest = event.item.type === "tool_call" ? event.item.clientRequest : undefined;
+        if (
+          event.item.type === "tool_call" &&
+          event.item.status === "waiting_for_client" &&
+          clientRequest &&
+          !submitted.has(clientRequest.correlationId)
+        ) {
+          submitted.add(clientRequest.correlationId);
+          let approved = !clientRequest.approvalRequired;
+          if (!approved && this.options.approveTool) {
+            approved = await this.options.approveTool({
+              turnId: turn.id,
+              item: event.item,
+              reason: clientRequest.approvalReason,
+            });
+          }
+          const result = !approved
+            ? { success: false, error: "Tool execution was not approved" }
+            : this.options.executeTool
+              ? await this.options.executeTool({ turnId: turn.id, item: event.item })
+              : this.toolRegistry?.has(event.item.tool)
+                ? {
+                    success: true,
+                    output: await this.toolRegistry.execute(
+                      event.item.tool,
+                      event.item.arguments,
+                    ),
+                  }
+              : { success: false, error: `Client tool is not registered: ${event.item.tool}` };
+          await this.submitToolResult(turn.id, {
+            correlationId: clientRequest.correlationId,
+            ...result,
+          }, signal);
+        }
+      } else if (event.type === "turn.failed") {
+        throw new Error(event.error.message);
+      } else if (event.type === "turn.completed") {
+        finalResponse = event.finalResponse;
+        summary = event.summary;
+      }
+    }
+    return { thread, turn, events, items: [...items.values()], finalResponse, summary };
   }
 
   async *streamTurn(

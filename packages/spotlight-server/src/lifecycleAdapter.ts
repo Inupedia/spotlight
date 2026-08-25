@@ -235,6 +235,8 @@ export class SpotlightLifecycleProjector {
         clientRequest: {
           correlationId: event.request.correlationId,
           dispatch: event.request.dispatch,
+          approvalRequired: event.request.approvalRequired,
+          approvalReason: event.request.approvalReason,
         },
       };
       return [this.emitItem(at, previous ? "item.updated" : "item.started", item)];
@@ -305,6 +307,12 @@ export class SpotlightLifecycleProjector {
           hostDispatches: event.summary.hostDispatches,
           hostRedispatches: event.summary.hostRedispatches,
           elapsedMs: event.summary.elapsedMs,
+          inputTokens: event.summary.inputTokens,
+          outputTokens: event.summary.outputTokens,
+          totalTokens: event.summary.totalTokens,
+          estimatedCostUsd: event.summary.estimatedCostUsd,
+          contextCharacters: event.summary.contextCharacters,
+          contextCompacted: event.summary.contextCompacted,
         },
         metadata: {
           commandName: event.commandName,

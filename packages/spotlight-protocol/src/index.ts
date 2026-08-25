@@ -5,6 +5,7 @@ import type { FrontendToolManifestV1 } from "./capabilities.js";
 export * from "./capabilities.js";
 export * from "./capabilitySecurity.js";
 export * from "./lifecycle.js";
+export * from "./schema.js";
 
 export type ToolExecutionTarget = "runtime" | "host";
 
@@ -20,6 +21,7 @@ export type AgentToolErrorCode =
   | "CIRCULAR_DEPENDENCY"
   | "PREREQUISITE_FAILED"
   | "PRECONDITION_FAILED"
+  | "TOOL_APPROVAL_REQUIRED"
   | "TOOL_RUN_FAILED"
   | "TOOL_TIMEOUT";
 
@@ -250,6 +252,16 @@ export interface CreateRunRequest {
   commandCatalog?: SpotlightCommandCatalog;
   /** Browser build id for memory invalidation (from client manifest). */
   frontendBuildId?: string;
+  /** Capability snapshot negotiated by /v1/initialize. */
+  capabilitySessionId?: string;
+  /** Optional JSON Schema for callers that require structured final output. */
+  outputSchema?: Record<string, unknown>;
+  /** Bounded caller-provided context, separated by trust class. */
+  additionalContext?: Record<
+    string,
+    import("./lifecycle.js").SpotlightAdditionalContextEntry
+  >;
+  policy?: import("./lifecycle.js").SpotlightTurnPolicy;
 }
 
 export interface CreateRunResponse {
@@ -259,9 +271,10 @@ export interface CreateRunResponse {
 /** Codex-style turn input. The server binds it to the thread in the URL. */
 export type SpotlightTurnStartRequest = Omit<
   CreateRunRequest,
-  "sessionId" | "userQuestion"
+  "sessionId" | "userQuestion" | "projectId"
 > & {
   input: string;
+  projectId?: string;
 };
 
 export interface SpotlightTurnStartResponse {
@@ -299,6 +312,12 @@ export interface SpotlightRunSummary {
   hostDispatches: number;
   hostRedispatches: number;
   elapsedMs: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  estimatedCostUsd?: number;
+  contextCharacters?: number;
+  contextCompacted?: boolean;
 }
 
 export interface SpotlightActiveRun {

@@ -17,6 +17,7 @@ export {
   createSpotlightHttp,
   normalizeServerUrl,
   resolveSpotlightClientConfig,
+  SpotlightHttpError,
   type SpotlightHttp,
 } from "./http.js";
 export {

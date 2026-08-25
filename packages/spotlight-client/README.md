@@ -1,6 +1,6 @@
 # @inupedia/spotlight-client
 
-Spotlight 的浏览器 Tool SDK。业务项目只需要用 `defineClientTool` 包装已有函数；Tool 名称、说明和 JSON Schema 在构建期自动生成。
+Spotlight 的浏览器 Tool SDK。业务项目只注册 Tools / Skills，然后调用 `thread.run()`；Tool 名称、说明、JSON Schema、manifest digest、Capability Session、SSE 重连和 Tool 结果回传都由 SDK 处理。
 
 ```ts
 import { defineClientTool } from "@inupedia/spotlight-client";
@@ -11,6 +11,18 @@ export const playVideoFullscreen = defineClientTool(
     await videoService.playFullscreen(name);
   },
 );
+
+const client = createSpotlightAppClient({
+  serverUrl: "/spotlight-api",
+  projectId: "my-project",
+  frontendBuildId: import.meta.env.VITE_BUILD_SHA,
+  tools: [playVideoFullscreen],
+  skills: [videoMonitoringSkill],
+});
+
+const thread = client.thread();
+const result = await thread.run("看看泸定取水口");
+console.log(result.finalResponse);
 ```
 
 Vite 项目必须启用构建插件：
@@ -24,7 +36,7 @@ spotlightClientTools({
 });
 ```
 
-生产构建会输出 `spotlight-client-manifest.json`。Server 只信任 CI 发布、与前端 Build ID 绑定的清单，不信任浏览器临时声明的 Tool。
+生产构建会输出 `spotlight-client-manifest.json`。首次初始化后 Server 保存不可变 Capability Snapshot，后续 Turn 不再重复上传整份 Tools / Skills。
 
 完整接入、显式 Schema 和生产部署见 [Client Tool 接入指南](../../docs/client-tools.md)。
 

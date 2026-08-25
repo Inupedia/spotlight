@@ -117,14 +117,17 @@ export function createClientToolRegistry(tools: readonly ClientTool[]) {
     }
     // Every dispatch path recovers by re-running the call, so a tool that
     // cannot be re-run safely must not reach the runtime at all.
-    if (!isToolTierReplaySafe(descriptor.tier ?? "navigate")) {
+    if (
+      !isToolTierReplaySafe(descriptor.tier ?? "navigate") &&
+      descriptor.requiresConfirmation !== true
+    ) {
       unsupported.push(descriptor.name);
     }
     byName.set(descriptor.name, tool);
   }
   if (unsupported.length > 0) {
     throw new Error(
-      `Client tools at the "mutate" tier cannot be registered yet: ${unsupported.join(", ")}. See docs/design/capability-protocol-v2.md.`,
+      `Client tools at the "mutate" tier must set requiresConfirmation: true: ${unsupported.join(", ")}.`,
     );
   }
   return {

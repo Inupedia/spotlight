@@ -1,4 +1,4 @@
-# Spotlight Server 0.7.0 部署与 Project Pack
+# Spotlight Server 0.7.1 部署与 Project Pack
 
 ## 结论
 
@@ -13,17 +13,19 @@
 ```yaml
 services:
   spotlight-server:
-    image: ghcr.io/inupedia/spotlight-server:0.7.0
+    image: ghcr.io/inupedia/spotlight-server:0.7.1
     ports: ["8787:8787"]
     env_file: .env
     environment:
       SPOTLIGHT_PROJECT_CONFIG: /project/spotlight.project.yml
       SPOTLIGHT_DATABASE_URL: postgresql://spotlight:password@postgres:5432/spotlight
+      SPOTLIGHT_STATE_DIR: /data/spotlight-state
     volumes:
       - ./spotlight-project:/project:ro
+      - spotlight-state:/data/spotlight-state
 ```
 
-生产环境使用 Postgres：LangGraph Checkpointer 保存会话状态，LangGraph Store 保存受控长期记忆。未配置 `SPOTLIGHT_DATABASE_URL` 时使用进程内 Memory，仅适合测试。
+生产环境使用 Postgres：LangGraph Checkpointer 保存图执行状态，LangGraph Store 保存受控长期记忆。`SPOTLIGHT_STATE_DIR` 另行保存产品级 Capability Session、Thread、Turn、事件重放与 fork；这两类状态不能混用。未配置 `SPOTLIGHT_DATABASE_URL` 时使用进程内 Memory，仅适合测试。
 
 短期 Memory 按 `projectId + sessionId` 隔离。长期 Memory 还要求浏览器提供稳定、已认证的 `memorySubjectId`；没有该值时 Server 会拒绝“记住”请求，绝不会退化成项目级共享记忆。Router 始终只读取本轮问题，历史消息与长期记忆只进入 Knowledge Agent。
 
@@ -52,7 +54,17 @@ Agent 只看见稳定的逻辑 Tool：
 - `project_knowledge_search`：当前配置可用 Yuxi。仅当问题是本系统/未公开资料时调用；公开介绍与新闻走 `web_search`，二者不会并行。
 - `web_search`：当前可用 Hikari。知识问答默认走这里，避免 Yuxi 拖慢能公开检索的问题。
 
-浏览器还可以随每个 Run 注册项目业务 Skill。Server 会限制 Skill 数量和正文大小，并把 `allowed-tools` 绑定到该浏览器构建上报的 Tool Manifest；Skill 只提供流程语义，不增加执行权限。能力说明也从当前 Run 的 Skills / Tools 动态生成，不进入长期 Memory。
+浏览器在 `initialize` 时一次注册项目业务 Skill。Server 会把完整 Skill 和 Tool Manifest 固化为 Capability Session；后续 Turn 只携带 Session ID。Skill 只提供流程语义，不增加执行权限。
+
+Project module 可以注册新的知识库或联网搜索 Provider，不需要修改 Spotlight 核心。例如把 Yuxi 换成 RAGFlow：
+
+```js
+export function registerProviders(registry) {
+  registry.registerKnowledge("ragflow", (config) => new RagflowProvider(config));
+}
+```
+
+配置随后只需写 `providers.knowledge.type: ragflow`。LangChain `StructuredTool` 可通过 `adaptLangChainTool()` 直接转换成 Spotlight Server Tool。
 
 ## 自定义 Server Tool
 
@@ -96,6 +108,7 @@ SPOTLIGHT_LLM_API_KEY=replace-me
 SPOTLIGHT_LLM_BASE_URL=https://api.openai.com/v1
 SPOTLIGHT_LLM_MODEL=gpt-4.1-mini
 SPOTLIGHT_DATABASE_URL=postgresql://spotlight:password@postgres:5432/spotlight
+SPOTLIGHT_STATE_DIR=/data/spotlight-state
 ```
 
 也支持 `SPOTLIGHT_LLM_PROVIDER=qwen` 配合 `QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL`。Router 可通过 `SPOTLIGHT_ROUTER_*` 使用独立模型，温度固定为 0。
@@ -104,6 +117,7 @@ SPOTLIGHT_DATABASE_URL=postgresql://spotlight:password@postgres:5432/spotlight
 
 ```bash
 curl http://127.0.0.1:8787/health
+curl -H 'Authorization: Bearer replace-me' http://127.0.0.1:8787/v1/diagnostics
 ```
 
 响应必须包含：

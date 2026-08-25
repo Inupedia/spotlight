@@ -7,6 +7,7 @@ import type {
   HostToolResultRequest,
   SpotlightInitializeRequest,
   SpotlightInitializeResponse,
+  SpotlightCapabilitySession,
   SpotlightSkillRegistration,
   SpotlightThreadStartRequest,
   SpotlightTurn,
@@ -19,6 +20,8 @@ import {
 } from "@inupedia/spotlight-protocol";
 import type { RunManager } from "./runManager.js";
 import { SpotlightLifecycleProjector } from "./lifecycleAdapter.js";
+import { SpotlightDurableState } from "./durableState.js";
+import type { SpotlightServerRunEvent } from "./runManager.js";
 import {
   assertRegisterableClientTools,
   UnsupportedToolTierError,
@@ -37,6 +40,8 @@ export interface BuildServerOptions {
   corsOrigin?: string | string[];
   uiPrompts?: Record<string, unknown>;
   videoChannels?: Array<{ id: string; name: string; aliases: string[] }>;
+  durableState?: SpotlightDurableState;
+  capabilitySessionTtlMs?: number;
 }
 
 function writeSse(reply: FastifyReply, event: unknown, seq?: number): void {
@@ -47,21 +52,25 @@ function writeSse(reply: FastifyReply, event: unknown, seq?: number): void {
 function initializeResponse(
   request: SpotlightInitializeRequest,
   options: BuildServerOptions,
+  capabilitySession: SpotlightCapabilitySession,
 ): SpotlightInitializeResponse {
   const readyBrowserTools = new Set(
     request.toolManifest.tools
-      .filter((tool) => deriveToolTier(tool) !== "mutate")
+      .filter((tool) =>
+        deriveToolTier(tool) !== "mutate" || tool.requiresConfirmation === true,
+      )
       .map((tool) => tool.name),
   );
   const serverTools = new Set(options.runManager.listServerToolNames());
   const tools = request.toolManifest.tools.map((tool) => {
-    const unsupported = deriveToolTier(tool) === "mutate";
+    const unsupported =
+      deriveToolTier(tool) === "mutate" && tool.requiresConfirmation !== true;
     return {
       name: tool.name,
       target: "browser" as const,
       status: unsupported ? "unsupported" as const : "ready" as const,
       ...(unsupported
-        ? { reason: "Mutating client Tools require acknowledgement and reconciliation support" }
+          ? { reason: "Mutating client Tools must require explicit approval" }
         : {}),
     };
   });
@@ -91,6 +100,7 @@ function initializeResponse(
     },
     projectId: options.projectId,
     acceptedManifestDigest: request.toolManifest.manifestDigest,
+    capabilitySession,
     capabilities: {
       transports: ["sse"],
       cancellation: true,
@@ -119,6 +129,7 @@ function resumeCursor(
 
 export async function buildServer(options: BuildServerOptions) {
   const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
+  const durableState = options.durableState ?? new SpotlightDurableState();
   await app.register(cors, {
     origin: options.corsOrigin ?? "*",
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -168,6 +179,16 @@ export async function buildServer(options: BuildServerOptions) {
     projectId: options.projectId,
     channels: options.videoChannels ?? [],
   }));
+  app.get("/v1/diagnostics", async () => ({
+    projectId: options.projectId,
+    serverVersion: SPOTLIGHT_SERVER_VERSION,
+    stateDigest: durableState.snapshotDigest(),
+    providers: {
+      knowledge: options.runManager.providerIds().knowledge,
+      webSearch: options.runManager.providerIds().webSearch,
+    },
+    serverTools: options.runManager.listServerToolNames(),
+  }));
 
   app.post<{ Body: SpotlightInitializeRequest }>(
     "/v1/initialize",
@@ -191,9 +212,26 @@ export async function buildServer(options: BuildServerOptions) {
           error: { code: "MANIFEST_PROJECT_MISMATCH", message: "Tool manifest project does not match" },
         });
       }
-      return initializeResponse(body, options);
+      const stored = durableState.createCapability({
+        projectId: options.projectId,
+        manifest: body.toolManifest,
+        registrations: body.skills ?? [],
+        skills: body.skillDefinitions ?? [],
+        ttlMs: options.capabilitySessionTtlMs,
+      });
+      return initializeResponse(body, options, {
+        id: stored.id,
+        projectId: stored.projectId,
+        manifestDigest: stored.manifestDigest,
+        createdAt: stored.createdAt,
+        expiresAt: stored.expiresAt,
+      });
     },
   );
+
+  app.get("/v1/threads", async () => ({
+    threads: durableState.listThreads(options.projectId),
+  }));
 
   app.post<{ Body: SpotlightThreadStartRequest }>(
     "/v1/threads",
@@ -204,13 +242,41 @@ export async function buildServer(options: BuildServerOptions) {
         });
       }
       return {
-        thread: {
-          id: request.body.threadId?.trim() || crypto.randomUUID(),
-          projectId: options.projectId,
-          status: "idle",
-          createdAt: Date.now(),
-        },
+        thread: durableState.createThread(
+          options.projectId,
+          request.body.threadId,
+        ),
       };
+    },
+  );
+
+  app.get<{ Params: { threadId: string } }>(
+    "/v1/threads/:threadId",
+    async (request, reply) => {
+      const thread = durableState.getThread(request.params.threadId);
+      return thread
+        ? { thread, turns: durableState.threadTurns(thread.id) }
+        : reply.status(404).send({ error: { code: "THREAD_NOT_FOUND" } });
+    },
+  );
+
+  app.post<{ Params: { threadId: string } }>(
+    "/v1/threads/:threadId/fork",
+    async (request, reply) => {
+      const thread = durableState.forkThread(request.params.threadId);
+      return thread
+        ? { thread }
+        : reply.status(404).send({ error: { code: "THREAD_NOT_FOUND" } });
+    },
+  );
+
+  app.delete<{ Params: { threadId: string } }>(
+    "/v1/threads/:threadId",
+    async (request, reply) => {
+      const thread = durableState.archiveThread(request.params.threadId);
+      return thread
+        ? { thread }
+        : reply.status(404).send({ error: { code: "THREAD_NOT_FOUND" } });
     },
   );
 
@@ -228,7 +294,44 @@ export async function buildServer(options: BuildServerOptions) {
           error: { code: "PROJECT_FORBIDDEN", message: "Project is not loaded" },
         });
       }
-      const manifestTools = body.clientToolManifest?.tools ?? [];
+      const capability = durableState.getCapability(body.capabilitySessionId);
+      if (body.capabilitySessionId && !capability) {
+        return reply.status(409).send({
+          error: {
+            code: "CAPABILITY_SESSION_EXPIRED",
+            message: "Capability session is missing or expired; initialize again",
+            retryable: true,
+          },
+        });
+      }
+      if (capability && capability.projectId !== options.projectId) {
+        return reply.status(403).send({
+          error: { code: "CAPABILITY_SESSION_FORBIDDEN" },
+        });
+      }
+      if (
+        capability &&
+        body.clientToolManifest &&
+        body.clientToolManifest.manifestDigest !== capability.manifestDigest
+      ) {
+        return reply.status(409).send({
+          error: {
+            code: "CAPABILITY_DIGEST_MISMATCH",
+            message: "Turn manifest does not match the initialized capability session",
+          },
+        });
+      }
+      const resolvedBody: SpotlightTurnStartRequest = {
+        ...body,
+        clientToolManifest:
+          body.clientToolManifest ?? capability?.toolManifest,
+        skills: body.skills ?? capability?.skills,
+        frontendBuildId:
+          body.frontendBuildId ?? capability?.toolManifest.frontendBuildId,
+        clientToolsManifestVersion:
+          body.clientToolsManifestVersion ?? capability?.manifestDigest,
+      };
+      const manifestTools = resolvedBody.clientToolManifest?.tools ?? [];
       try {
         assertRegisterableClientTools(manifestTools);
       } catch (error) {
@@ -242,7 +345,8 @@ export async function buildServer(options: BuildServerOptions) {
           },
         });
       }
-      const { input, ...rest } = body;
+      durableState.createThread(options.projectId, request.params.threadId);
+      const { input, ...rest } = resolvedBody;
       const run = options.runManager.createRun({
         ...rest,
         projectId: options.projectId,
@@ -265,6 +369,37 @@ export async function buildServer(options: BuildServerOptions) {
     async (request, reply) => {
       const state = options.runManager.getRun(request.params.turnId);
       if (!state) {
+        const stored = durableState.getTurn(request.params.turnId);
+        if (stored) {
+          const afterSeq = resumeCursor(
+            request.headers["last-event-id"],
+            request.query?.lastEventId,
+          );
+          reply.raw.writeHead(200, {
+            "Content-Type": "text/event-stream; charset=utf-8",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive",
+            "X-Accel-Buffering": "no",
+          });
+          reply.hijack();
+          const projector = new SpotlightLifecycleProjector(
+            stored.threadId,
+            stored.id,
+            stored.startedAt,
+            stored.request.skills,
+          );
+          const projected = [
+            projector.startEvent(),
+            ...stored.events.flatMap((event) =>
+              projector.project(event as SpotlightServerRunEvent),
+            ),
+          ];
+          for (const event of projected) {
+            if (event.seq > afterSeq) writeSse(reply, event, event.seq);
+          }
+          reply.raw.end();
+          return;
+        }
         const expired = options.runManager.isExpired(request.params.turnId);
         return reply.status(expired ? 410 : 404).send({
           error: expired

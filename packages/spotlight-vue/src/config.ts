@@ -31,6 +31,13 @@ export type SpotlightConfig = SpotlightClientConfig & {
   getUiContext?: () => AgentUiContext;
   /** Stable authenticated subject id. Omit to disable cross-session memory. */
   getMemorySubjectId?: () => string | null | undefined;
+  /** Required for high-risk or external-state Tools unless pre-approved by Turn policy. */
+  approveTool?: (request: {
+    name: string;
+    displayName: string;
+    input: Record<string, unknown>;
+    reason?: string;
+  }) => boolean | Promise<boolean>;
   /** Optional UI-only quick actions. */
   quickPanelActions?: SpotlightQuickPanelActions;
   /** Override suggested question chips (defaults use server ui-prompts). */

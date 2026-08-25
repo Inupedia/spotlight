@@ -25,6 +25,7 @@ export function formatToolFailure(
     CIRCULAR_DEPENDENCY: "工具依赖配置存在循环",
     PREREQUISITE_FAILED: "前置步骤执行失败",
     PRECONDITION_FAILED: "当前页面状态不满足执行条件",
+    TOOL_APPROVAL_REQUIRED: "该操作需要用户明确批准",
     TOOL_RUN_FAILED: "工具执行时发生运行错误",
     TOOL_TIMEOUT: "工具执行超时",
   };

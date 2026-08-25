@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-protocol",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "Shared wire types for Inupedia Spotlight (client ↔ server)",
   "type": "module",
   "license": "MIT",
@@ -9,7 +9,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    }
+    },
+    "./schema": "./dist/spotlight-app.schema.json"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +24,7 @@
     "clean": "rm -rf dist",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json --noEmit",
     "test": "vitest run",
-    "build": "pnpm run clean && tsc -p tsconfig.json && pnpm run verify:exports",
+    "build": "pnpm run clean && tsc -p tsconfig.json && node scripts/generate-schema.mjs && pnpm run verify:exports",
     "verify:exports": "node ../scripts/verify-package-exports.mjs",
     "prepack": "pnpm run build"
   },

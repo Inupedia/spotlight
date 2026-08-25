@@ -6,6 +6,7 @@ import { loadProjectPack } from "./project.js";
 import { LangChainIntentRouter } from "./router.js";
 import { RunManager } from "./runManager.js";
 import { buildServer } from "./server.js";
+import { SpotlightDurableState } from "./durableState.js";
 import { createPackMemoryStores } from "@inupedia/spotlight-memory/node";
 
 function required(env: NodeJS.ProcessEnv, name: string, fallbackName?: string): string {
@@ -56,6 +57,9 @@ export async function main(): Promise<void> {
   const { modelConfig, routerConfig } = resolveModelConfigs();
   const memory = createMemoryRuntime(process.env.SPOTLIGHT_DATABASE_URL);
   await memory.setup();
+  const durableState = new SpotlightDurableState(
+    process.env.SPOTLIGHT_STATE_DIR?.trim() || ".spotlight/state",
+  );
   const packMemory = createPackMemoryStores({
     packsRoot,
     projectId: project.projectId,
@@ -72,6 +76,7 @@ export async function main(): Promise<void> {
     checkpointer: memory.checkpointer,
     store: memory.store,
     memoryGate: packMemory.gate,
+    durableState,
     hostActionTimeoutMs: Number(process.env.SPOTLIGHT_HOST_ACTION_TIMEOUT_MS ?? 30_000),
   });
   const app = await buildServer({
@@ -81,6 +86,10 @@ export async function main(): Promise<void> {
     corsOrigin: process.env.CORS_ORIGIN ?? "*",
     uiPrompts: project.uiPrompts,
     videoChannels: project.videoChannels,
+    durableState,
+    capabilitySessionTtlMs: Number(
+      process.env.SPOTLIGHT_CAPABILITY_SESSION_TTL_MS ?? 24 * 60 * 60_000,
+    ),
   });
   await app.listen({
     host: process.env.HOST ?? "0.0.0.0",

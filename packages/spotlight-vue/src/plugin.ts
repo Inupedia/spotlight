@@ -16,7 +16,6 @@ import {
 } from "./config.js";
 import { mountSpotlightShell, unmountSpotlightShellForTests } from "./mountShell.js";
 import type { SpotlightAvatarConfig } from "./avatar/config.js";
-import { spotlightSkillToolNames } from "@inupedia/spotlight-protocol";
 
 export const SPOTLIGHT_HTTP_KEY: InjectionKey<SpotlightHttp> =
   Symbol("spotlight-http");
@@ -99,7 +98,7 @@ export const SpotlightVue = {
       clientInfo: {
         name: "spotlight-vue",
         title: "Spotlight Vue",
-        version: "0.7.0",
+        version: "0.7.1",
       },
       toolManifest: () => createClientToolManifest({
         projectId: config.projectId,
@@ -110,17 +109,7 @@ export const SpotlightVue = {
         const skills = config.getSkillsForRun?.()
           ?? (typeof config.skills === "function" ? config.skills() : config.skills)
           ?? [];
-        return skills.map((skill) => ({
-          name: skill.name,
-          displayName: skill.interface?.displayName ?? skill.displayName,
-          description: skill.description,
-          version: skill.version,
-          allowImplicitInvocation:
-            skill.policy?.allowImplicitInvocation
-            ?? skill.disableModelInvocation !== true,
-          userInvocable: skill.userInvocable,
-          dependencies: { tools: spotlightSkillToolNames(skill) },
-        }));
+        return skills;
       },
     });
 

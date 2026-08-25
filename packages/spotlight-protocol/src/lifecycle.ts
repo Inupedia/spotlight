@@ -41,6 +41,16 @@ export interface SpotlightInitializeRequest {
   capabilities: SpotlightClientCapabilities;
   toolManifest: FrontendToolManifestV1;
   skills?: SpotlightSkillRegistration[];
+  /** Full consumer Skill definitions captured once for subsequent Turns. */
+  skillDefinitions?: import("./index.js").SpotlightSkill[];
+}
+
+export interface SpotlightCapabilitySession {
+  id: string;
+  projectId: string;
+  manifestDigest: string;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export type SpotlightCapabilityRuntimeStatus =
@@ -73,6 +83,7 @@ export interface SpotlightInitializeResponse {
   };
   projectId: string;
   acceptedManifestDigest: string;
+  capabilitySession: SpotlightCapabilitySession;
   capabilities: {
     transports: SpotlightClientTransport[];
     cancellation: true;
@@ -90,6 +101,8 @@ export interface SpotlightThread {
   projectId: string;
   status: SpotlightThreadStatus;
   createdAt: number;
+  updatedAt?: number;
+  archivedAt?: number;
 }
 
 export interface SpotlightThreadStartRequest {
@@ -115,6 +128,20 @@ export interface SpotlightTurn {
   threadId: string;
   status: SpotlightTurnStatus;
   startedAt: number;
+  completedAt?: number;
+}
+
+export type SpotlightApprovalMode = "never" | "on_risk" | "always";
+
+export interface SpotlightTurnPolicy {
+  approvalMode?: SpotlightApprovalMode;
+  approvedToolNames?: string[];
+  deniedToolNames?: string[];
+}
+
+export interface SpotlightAdditionalContextEntry {
+  value: string;
+  kind: "application" | "untrusted";
 }
 
 export type SpotlightItemStatus =
@@ -155,6 +182,8 @@ export interface SpotlightToolCallItem extends SpotlightItemBase {
   clientRequest?: {
     correlationId: string;
     dispatch: number;
+    approvalRequired?: boolean;
+    approvalReason?: string;
   };
   summary?: string;
   result?: unknown;
@@ -227,6 +256,12 @@ export type SpotlightTurnEvent =
         hostDispatches: number;
         hostRedispatches: number;
         elapsedMs: number;
+        inputTokens?: number;
+        outputTokens?: number;
+        totalTokens?: number;
+        estimatedCostUsd?: number;
+        contextCharacters?: number;
+        contextCompacted?: boolean;
       };
       metadata?: Record<string, unknown>;
     })

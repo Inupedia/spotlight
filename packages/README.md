@@ -25,6 +25,20 @@ export const spotlightConfig = defineSpotlightConfig({
 });
 ```
 
+非 Vue 项目可以直接使用统一入口：
+
+```ts
+const client = createSpotlightAppClient({
+  serverUrl: "/spotlight-api",
+  projectId: "my-project",
+  tools: [openVideo],
+  skills: [videoSkill],
+});
+
+const thread = client.thread();
+const answer = await thread.run("打开 1 号视频");
+```
+
 构建期自动推导导出名、JSDoc 和 TypeScript 类型。前端不需要了解 LangChain；Server 将可信清单转换为 LangChain Tool，并用 LangGraph 编排关键多步工作流。
 
 完整说明见 [Client Tool 接入指南](../docs/client-tools.md)。
