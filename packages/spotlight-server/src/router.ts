@@ -15,6 +15,7 @@ import {
   routeViaSkillCatalog,
   type SkillRouteResult,
 } from "./skillIntentRouter.js";
+import { normalizeClientToolInput } from "./tools.js";
 
 const intentSchema = z.object({
   route: z.enum(["knowledge", "action", "clarify"]),
@@ -109,7 +110,9 @@ function hasUsableRequiredValue(value: unknown): boolean {
 }
 
 function isGeneratedMissingValue(value: unknown): boolean {
-  return typeof value === "string" && GENERATED_MISSING_VALUE.test(value.trim());
+  return (
+    typeof value === "string" && GENERATED_MISSING_VALUE.test(value.trim())
+  );
 }
 
 function schemaTypeList(schema: InputSchemaShape): string[] {
@@ -122,7 +125,10 @@ function valueMatchesSchema(value: unknown, rawSchema: unknown): boolean {
   if (!rawSchema || typeof rawSchema !== "object") return true;
   const schema = rawSchema as InputSchemaShape;
 
-  if (Array.isArray(schema.enum) && !schema.enum.some((item) => Object.is(item, value))) {
+  if (
+    Array.isArray(schema.enum) &&
+    !schema.enum.some((item) => Object.is(item, value))
+  ) {
     return false;
   }
 
@@ -141,7 +147,9 @@ function valueMatchesSchema(value: unknown, rawSchema: unknown): boolean {
         case "array":
           return Array.isArray(value);
         case "object":
-          return Boolean(value && typeof value === "object" && !Array.isArray(value));
+          return Boolean(
+            value && typeof value === "object" && !Array.isArray(value),
+          );
         case "null":
           return value === null;
         default:
@@ -177,13 +185,15 @@ function valueMatchesSchema(value: unknown, rawSchema: unknown): boolean {
   return true;
 }
 
-function toolSchemaHasInputProperties(tool?: FrontendToolDescriptorV1): boolean {
+function toolSchemaHasInputProperties(
+  tool?: FrontendToolDescriptorV1,
+): boolean {
   if (!tool?.inputSchema || typeof tool.inputSchema !== "object") return false;
   const properties = (tool.inputSchema as { properties?: unknown }).properties;
   return Boolean(
     properties &&
-      typeof properties === "object" &&
-      Object.keys(properties as Record<string, unknown>).length > 0,
+    typeof properties === "object" &&
+    Object.keys(properties as Record<string, unknown>).length > 0,
   );
 }
 
@@ -208,7 +218,8 @@ function selectedToolAndRequired(
       )
     : [];
   const properties =
-    tool.inputSchema?.properties && typeof tool.inputSchema.properties === "object"
+    tool.inputSchema?.properties &&
+    typeof tool.inputSchema.properties === "object"
       ? (tool.inputSchema.properties as Record<string, unknown>)
       : {};
   return { tool, required, properties };
@@ -227,7 +238,10 @@ export function invalidRequiredToolInputKeys(
   decision: IntentDecision,
   clientTools: FrontendToolDescriptorV1[],
 ): string[] {
-  const { required, properties } = selectedToolAndRequired(decision, clientTools);
+  const { required, properties } = selectedToolAndRequired(
+    decision,
+    clientTools,
+  );
   const input = decision.requestedToolInput ?? {};
   return required.filter((field) => {
     const value = input[field];
@@ -248,27 +262,38 @@ export function applyToolInputCompletenessFence(
       requestedToolInput: undefined,
     };
   }
-  const missing = missingRequiredToolInputKeys(decision, clientTools);
+  const selectedTool = selectedToolAndRequired(decision, clientTools).tool;
+  const normalizedDecision =
+    selectedTool && decision.requestedToolInput
+      ? {
+          ...decision,
+          requestedToolInput: normalizeClientToolInput(
+            selectedTool,
+            decision.requestedToolInput,
+          ),
+        }
+      : decision;
+  const missing = missingRequiredToolInputKeys(normalizedDecision, clientTools);
   if (missing.length > 0) {
     return {
-      ...decision,
+      ...normalizedDecision,
       route: "clarify",
       reason: `The selected client tool is missing required input: ${missing.join(", ")}.`,
       requestedToolNames: [],
       requestedToolInput: undefined,
     };
   }
-  const invalid = invalidRequiredToolInputKeys(decision, clientTools);
+  const invalid = invalidRequiredToolInputKeys(normalizedDecision, clientTools);
   if (invalid.length > 0) {
     return {
-      ...decision,
+      ...normalizedDecision,
       route: "clarify",
       reason: `The selected client tool has invalid or fabricated required input: ${invalid.join(", ")}.`,
       requestedToolNames: [],
       requestedToolInput: undefined,
     };
   }
-  return decision;
+  return normalizedDecision;
 }
 
 export interface IntentRouter {
@@ -346,10 +371,9 @@ export class LangChainIntentRouter implements IntentRouter {
     skills: SpotlightSkill[],
     clientTools: FrontendToolDescriptorV1[],
     route: SkillRouteResult,
-  ): Promise<Pick<
-    IntentDecision,
-    "requestedToolNames" | "requestedToolInput"
-  >> {
+  ): Promise<
+    Pick<IntentDecision, "requestedToolNames" | "requestedToolInput">
+  > {
     if (route.route !== "action") {
       return { requestedToolNames: [] };
     }
@@ -365,11 +389,7 @@ export class LangChainIntentRouter implements IntentRouter {
     if (matchedSkills.length !== 1) {
       return { requestedToolNames: [] };
     }
-    const candidates = candidateToolsForSkillRoute(
-      skills,
-      clientTools,
-      route,
-    );
+    const candidates = candidateToolsForSkillRoute(skills, clientTools, route);
     return this.selectSkillTool(question, matchedSkills[0], candidates);
   }
 

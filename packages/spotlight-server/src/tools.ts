@@ -37,6 +37,43 @@ export interface LangChainToolProgress {
   ) => void;
 }
 
+/**
+ * Structured-output models commonly emit null for optional tool fields. JSON
+ * Schema treats an omitted optional string differently from a nullable string,
+ * so remove only absent optional values before LangChain validates/invokes the
+ * selected client tool. Unknown fields are also discarded when the consumer
+ * manifest explicitly forbids them.
+ */
+export function normalizeClientToolInput(
+  descriptor: FrontendToolDescriptorV1,
+  input: Record<string, unknown>,
+): Record<string, unknown> {
+  const schema = descriptor.inputSchema;
+  if (!schema || typeof schema !== "object") return { ...input };
+  const properties =
+    schema.properties && typeof schema.properties === "object"
+      ? (schema.properties as Record<string, unknown>)
+      : {};
+  const required = new Set(
+    Array.isArray(schema.required)
+      ? schema.required.filter(
+          (field): field is string => typeof field === "string",
+        )
+      : [],
+  );
+  const rejectUnknown = schema.additionalProperties === false;
+
+  return Object.fromEntries(
+    Object.entries(input).filter(([key, value]) => {
+      if (rejectUnknown && !Object.hasOwn(properties, key)) return false;
+      if ((value === null || value === undefined) && !required.has(key)) {
+        return false;
+      }
+      return true;
+    }),
+  );
+}
+
 export function createClientLangChainTool(
   descriptor: FrontendToolDescriptorV1,
   context: RunContext,

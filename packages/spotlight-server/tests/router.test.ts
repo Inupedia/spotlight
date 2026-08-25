@@ -1,5 +1,8 @@
 import { FakeToolCallingModel } from "langchain";
-import { LangChainIntentRouter } from "../src/router.js";
+import {
+  applyToolInputCompletenessFence,
+  LangChainIntentRouter,
+} from "../src/router.js";
 
 const readOnlyVideoTool = {
   name: "getVideoInfo",
@@ -32,6 +35,43 @@ const knowledgeSkill = {
 };
 
 describe("LangChain intent router", () => {
+  it("drops null optional client-tool fields before schema validation", () => {
+    const playVideoTool = {
+      name: "playVideoFullscreen",
+      version: "1.0.0",
+      description: "按通道 ID 或名称播放视频",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          videoChannelId: { type: "string" },
+          name: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+      sideEffect: "ui" as const,
+      replayPolicy: "never" as const,
+      riskLevel: "low" as const,
+    };
+    const decision = applyToolInputCompletenessFence(
+      {
+        route: "action",
+        confidence: 1,
+        reason: "monitoring target",
+        requestedToolNames: [playVideoTool.name],
+        explicitActionEvidence: "查看",
+        requestedToolInput: {
+          videoChannelId: null,
+          name: "钢筋棚加工区2",
+          invented: null,
+        },
+      },
+      [playVideoTool],
+    );
+
+    expect(decision.route).toBe("action");
+    expect(decision.requestedToolInput).toEqual({ name: "钢筋棚加工区2" });
+  });
+
   it("routes informational questions to knowledge when no consumer skills are registered", async () => {
     const model = new FakeToolCallingModel({
       structuredResponse: {

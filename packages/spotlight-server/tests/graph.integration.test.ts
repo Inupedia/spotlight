@@ -340,7 +340,10 @@ describe("LangGraph runtime isolation", () => {
         async search() {
           return [
             { content: "引大济岷是一项跨流域调水工程。" },
-            { title: "引大济岷工程 - 维基百科", content: "从大渡河引水补充岷江。" },
+            {
+              title: "引大济岷工程 - 维基百科",
+              content: "从大渡河引水补充岷江。",
+            },
           ];
         },
       },
@@ -542,6 +545,69 @@ describe("LangGraph runtime isolation", () => {
     );
   });
 
+  it("normalizes null optional fields before direct Skill tool execution", async () => {
+    const hostResults: HostToolResultRequest[] = [];
+    const runContext = context("我想看一下钢筋棚加工区2", hostResults);
+    const videoTool: FrontendToolDescriptorV1 = {
+      ...descriptor,
+      name: "playVideoFullscreen",
+      description: "按通道 ID 或名称播放视频",
+      inputSchema: {
+        type: "object",
+        properties: {
+          videoChannelId: { type: "string" },
+          name: { type: "string" },
+        },
+        additionalProperties: false,
+      },
+    };
+    const currentManifest = runContext.request.clientToolManifest;
+    if (!currentManifest) throw new Error("Expected client tool manifest");
+    runContext.request.clientToolManifest = {
+      ...currentManifest,
+      tools: [videoTool],
+    };
+    runContext.request.skills = [
+      {
+        name: "skill.monitoring",
+        displayName: "现场监控",
+        description: "播放具体监控",
+        allowedTools: [videoTool.name],
+        capabilityExamples: ["我想看一下钢筋棚加工区2"],
+      },
+    ];
+    let capturedInput: Record<string, unknown> | undefined;
+    runContext.host.request = async (call) => {
+      capturedInput = call.input;
+      return {
+        correlationId: call.id,
+        success: true,
+        output: { opened: call.input.name },
+      };
+    };
+
+    const result = await runSpotlightGraph(runContext, {
+      model: new FakeToolCallingModel(),
+      router: router({
+        route: "action",
+        confidence: 1,
+        reason: "monitoring target",
+        requestedToolNames: [videoTool.name],
+        requestedToolInput: {
+          videoChannelId: null,
+          name: "钢筋棚加工区2",
+        },
+        explicitActionEvidence: "查看",
+        matchedSkillNames: ["skill.monitoring"],
+      }),
+      checkpointer: new MemorySaver(),
+      store: new InMemoryStore(),
+    });
+
+    expect(result.invokedClientTools).toEqual([videoTool.name]);
+    expect(capturedInput).toEqual({ name: "钢筋棚加工区2" });
+  });
+
   it("persists short-term messages for the same session", async () => {
     const checkpointer = new MemorySaver();
     const store = new InMemoryStore();
@@ -580,7 +646,9 @@ describe("LangGraph runtime isolation", () => {
           async search({ query }) {
             return [
               {
-                title: query.includes("引大济岷") ? "引大济岷工程概况" : "监控点位清单",
+                title: query.includes("引大济岷")
+                  ? "引大济岷工程概况"
+                  : "监控点位清单",
                 content: `${query} 的资料`,
               },
             ];
@@ -608,18 +676,18 @@ describe("LangGraph runtime isolation", () => {
       ...options,
       onPhase: (_phase, summary) => firstPhases.push(summary),
     });
-    expect(firstPhases.some((summary) => summary.includes("引大济岷工程概况"))).toBe(
-      true,
-    );
+    expect(
+      firstPhases.some((summary) => summary.includes("引大济岷工程概况")),
+    ).toBe(true);
 
     const secondPhases: string[] = [];
     await runSpotlightGraph(runContextFor("这个模块有哪些监控"), {
       ...options,
       onPhase: (_phase, summary) => secondPhases.push(summary),
     });
-    expect(secondPhases.some((summary) => summary.includes("监控点位清单"))).toBe(
-      true,
-    );
+    expect(
+      secondPhases.some((summary) => summary.includes("监控点位清单")),
+    ).toBe(true);
     expect(
       secondPhases.some((summary) => summary.includes("引大济岷工程概况")),
     ).toBe(false);

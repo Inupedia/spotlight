@@ -37,6 +37,7 @@ import {
   createLongTermMemoryTools,
   createServerLangChainTool,
   memoryNamespace,
+  normalizeClientToolInput,
 } from "../tools.js";
 import { emitPhase, emitTool } from "./emit.js";
 import {
@@ -100,7 +101,9 @@ async function invokeProviderSearch(
   source: string,
   toolName: string,
   displayName: string,
-  search: (query: string) => Promise<import("../contracts.js").KnowledgeEvidence[]>,
+  search: (
+    query: string,
+  ) => Promise<import("../contracts.js").KnowledgeEvidence[]>,
   query: string,
 ) {
   const call = knowledgeToolCall(toolName, displayName, { query });
@@ -198,7 +201,10 @@ function buildGatherSubgraph(
     })
     .addNode("provider_knowledge", async (state, config) => {
       const provider = context.project.knowledgeProvider;
-      if (!provider || !gatherSourceFlags(context, state, serverReads.length).knowledge) {
+      if (
+        !provider ||
+        !gatherSourceFlags(context, state, serverReads.length).knowledge
+      ) {
         return { evidenceBundle: emptyEvidenceBundle() };
       }
       return {
@@ -249,7 +255,10 @@ function buildGatherSubgraph(
     })
     .addNode("provider_web", async (state, config) => {
       const provider = context.project.webSearchProvider;
-      if (!provider || !gatherSourceFlags(context, state, serverReads.length).web) {
+      if (
+        !provider ||
+        !gatherSourceFlags(context, state, serverReads.length).web
+      ) {
         return { evidenceBundle: emptyEvidenceBundle() };
       }
       return {
@@ -301,7 +310,9 @@ function buildGatherSubgraph(
               items: [
                 {
                   content:
-                    typeof output === "string" ? output : JSON.stringify(output),
+                    typeof output === "string"
+                      ? output
+                      : JSON.stringify(output),
                   title: item.name,
                 },
               ],
@@ -541,21 +552,16 @@ export function compileSpotlightWorkflow(
         runSkills,
         state.decision,
       );
-      const allowed = actionToolAllowlist(
-        scopedTools,
-        { ...state.decision, route: "action" },
-      );
+      const allowed = actionToolAllowlist(scopedTools, {
+        ...state.decision,
+        route: "action",
+      });
       const selectedTool = state.decision.requestedToolNames[0];
       const planSummary =
         selectedTool && allowed.some((tool) => tool.name === selectedTool)
           ? `${initiallyMatchedSkills.length > 0 ? `使用 Skill：${initiallyMatchedSkills.map((skill) => `${skill.displayName ?? skill.name}（${skill.name}）`).join("、")}；` : ""}已选定工具：${selectedTool}。`
           : `${initiallyMatchedSkills.length > 0 ? `使用 Skill：${initiallyMatchedSkills.map((skill) => `${skill.displayName ?? skill.name}（${skill.name}）`).join("、")}；` : ""}正在从 ${allowed.length} 个已注册页面工具中匹配“${compactText(state.question, 56)}”。`;
-      emitPhase(
-        config,
-        options,
-        "action_agent_start",
-        planSummary,
-      );
+      emitPhase(config, options, "action_agent_start", planSummary);
       return {};
     })
     .addNode("action_execute", async (state, config) => {
@@ -568,10 +574,10 @@ export function compileSpotlightWorkflow(
         runSkills,
         state.decision,
       );
-      const allowed = actionToolAllowlist(
-        scopedTools,
-        { ...state.decision, route: "action" },
-      );
+      const allowed = actionToolAllowlist(scopedTools, {
+        ...state.decision,
+        route: "action",
+      });
       const selectedToolName = state.decision.requestedToolNames[0];
       const routerSelected =
         (state.decision.matchedSkillNames?.length ?? 0) > 0 &&
@@ -581,7 +587,10 @@ export function compileSpotlightWorkflow(
 
       if (routerSelected) {
         const descriptor = allowed[0];
-        const input = state.decision.requestedToolInput ?? {};
+        const input = normalizeClientToolInput(
+          descriptor,
+          state.decision.requestedToolInput ?? {},
+        );
         const required = Array.isArray(descriptor.inputSchema?.required)
           ? descriptor.inputSchema.required
           : [];
@@ -770,7 +779,12 @@ export function compileSpotlightWorkflow(
       });
       const result = await agent.invoke({ messages: state.messages }, config);
       const reply = finalAgentText(result);
-      emitPhase(config, options, "knowledge_agent_done", "已处理用户的记忆请求。");
+      emitPhase(
+        config,
+        options,
+        "knowledge_agent_done",
+        "已处理用户的记忆请求。",
+      );
       return { ...assistantUpdate(reply), invokedClientTools: [] };
     })
     .addNode("clarify", async () => {
