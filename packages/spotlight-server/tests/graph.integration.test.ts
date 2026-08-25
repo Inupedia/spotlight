@@ -479,7 +479,7 @@ describe("LangGraph runtime isolation", () => {
     );
   });
 
-  it("directly executes a uniquely planned Skill tool with structured input", async () => {
+  it("directly executes an exact planned Tool even when multiple Skills match", async () => {
     const hostResults: HostToolResultRequest[] = [];
     const phases: Array<{ phase: string; summary: string }> = [];
     const runContext = context("查看2024年质量数据", hostResults);
@@ -494,16 +494,34 @@ describe("LangGraph runtime isolation", () => {
         additionalProperties: false,
       },
     };
+    const progressYearTool = {
+      ...descriptor,
+      name: "selectProgressYear",
+      description: "切换进度年份筛选",
+      inputSchema: {
+        type: "object" as const,
+        properties: { year: { type: "string", enum: ["2024"] } },
+        required: ["year"],
+        additionalProperties: false,
+      },
+    };
     const currentManifest = runContext.request.clientToolManifest;
     if (!currentManifest) throw new Error("Expected client tool manifest");
     runContext.request.clientToolManifest = {
       ...currentManifest,
-      tools: [qualityYearTool],
+      tools: [qualityYearTool, progressYearTool],
     };
     runContext.request.skills = [
       {
         name: "skill.progress.filters",
         displayName: "主场景筛选",
+        description: "进度筛选",
+        allowedTools: [progressYearTool.name],
+        capabilityExamples: ["查看2024年进度数据"],
+      },
+      {
+        name: "skill.quality.data",
+        displayName: "质量管理数据",
         description: "质量筛选",
         allowedTools: [qualityYearTool.name],
         capabilityExamples: ["查看2024年质量数据"],
@@ -518,7 +536,7 @@ describe("LangGraph runtime isolation", () => {
         requestedToolNames: [qualityYearTool.name],
         requestedToolInput: { year: "2024" },
         explicitActionEvidence: "查看2024年质量数据",
-        matchedSkillNames: ["skill.progress.filters"],
+        matchedSkillNames: ["skill.progress.filters", "skill.quality.data"],
       }),
       checkpointer: new MemorySaver(),
       store: new InMemoryStore(),
@@ -532,9 +550,7 @@ describe("LangGraph runtime isolation", () => {
     expect(phases).toContainEqual(
       expect.objectContaining({
         phase: "action_agent_done",
-        summary: expect.stringContaining(
-          "使用 Skill：主场景筛选（skill.progress.filters）",
-        ),
+        summary: expect.stringContaining("质量管理数据（skill.quality.data）"),
       }),
     );
     expect(phases).toContainEqual(

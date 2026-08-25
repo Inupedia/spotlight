@@ -579,14 +579,13 @@ export function compileSpotlightWorkflow(
         route: "action",
       });
       const selectedToolName = state.decision.requestedToolNames[0];
-      const routerSelected =
+      const routerSelectedTool =
         (state.decision.matchedSkillNames?.length ?? 0) > 0 &&
         selectedToolName &&
-        allowed.length === 1 &&
-        allowed[0].name === selectedToolName;
+        allowed.find((tool) => tool.name === selectedToolName);
 
-      if (routerSelected) {
-        const descriptor = allowed[0];
+      if (routerSelectedTool) {
+        const descriptor = routerSelectedTool;
         const input = normalizeClientToolInput(
           descriptor,
           state.decision.requestedToolInput ?? {},
