@@ -3,6 +3,9 @@ import type {
   SpotlightMemoryDecision,
   SpotlightRunStatus,
   SpotlightRunSummary,
+  SpotlightTurnEvent,
+  SpotlightToolCallItem,
+  SpotlightKnowledgeSearchItem,
   ToolSideEffectV1,
 } from "@inupedia/spotlight-protocol";
 import { serializeSkillsForRemote } from "@inupedia/spotlight-client";
@@ -22,7 +25,7 @@ import {
 import type { HandlerApi } from "../store/pipeline/types.js";
 import type { AgentStep, AgentStepToolCall } from "../store/types.js";
 import type { SpotlightExecutionEvent } from "../store/runtime/types.js";
-import { getSpotlightConfig } from "../plugin.js";
+import { getSpotlightAppClient, getSpotlightConfig } from "../plugin.js";
 import { getSkillsPoolForRun } from "../skills/index.js";
 import {
   ensureHostToolsManifest,
@@ -607,6 +610,137 @@ export async function applyRemoteEvent(
   }
 }
 
+function canonicalToolCall(
+  item: SpotlightToolCallItem | SpotlightKnowledgeSearchItem,
+): AgentStepToolCall {
+  const status = item.status === "completed"
+    ? "done"
+    : item.status === "failed"
+      ? "error"
+      : "running";
+  if (item.type === "knowledge_search") {
+    return {
+      id: item.id,
+      name: item.tool,
+      displayName: item.displayName,
+      argsText: JSON.stringify({ query: item.query }, null, 2),
+      resultText: formatEvidenceOutput(item.result),
+      summary: item.summary,
+      status,
+    };
+  }
+  return {
+    id: item.id,
+    name: item.tool,
+    displayName: item.displayName,
+    argsText: JSON.stringify(item.arguments ?? {}, null, 2),
+    resultText: item.result === undefined
+      ? undefined
+      : typeof item.result === "string"
+        ? item.result
+        : JSON.stringify(item.result, null, 2),
+    summary: item.summary ?? item.error?.message,
+    errorCode: item.error?.code,
+    trace: item.trace as AgentStepToolCall["trace"],
+    status,
+  };
+}
+
+/** Render only stable Thread / Turn / Item events; LangGraph phases stay server-side. */
+export async function applyLifecycleEvent(
+  api: HandlerApi,
+  event: SpotlightTurnEvent,
+  lookup?: ToolLaneLookup,
+): Promise<void> {
+  if (event.type === "ping") return;
+  if (event.type === "turn.started") {
+    setTransitionStep(
+      api,
+      SPOTLIGHT_PIPELINE_STEP_IDS.understand,
+      "理解问题",
+      "active",
+      "正在理解您的问题。",
+    );
+    return;
+  }
+  if (event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed") {
+    const item = event.item;
+    if (item.type === "reasoning") {
+      if (item.category === "routing" || item.category === "memory") {
+        setTransitionStep(
+          api,
+          SPOTLIGHT_PIPELINE_STEP_IDS.understand,
+          "理解问题",
+          event.type === "item.completed" ? "done" : "active",
+          item.summary,
+        );
+      } else {
+        const actionProgress = /页面|操作|执行/u.test(item.summary);
+        const stepId = actionProgress
+          ? SPOTLIGHT_PIPELINE_STEP_IDS.act
+          : SPOTLIGHT_PIPELINE_STEP_IDS.gather;
+        ensureStep(api, stepId, actionProgress ? "操作页面" : "获取信息");
+        api.setStep(
+          stepId,
+          event.type === "item.completed" ? "done" : "active",
+          item.summary,
+        );
+      }
+      return;
+    }
+    if (item.type === "skill_use") {
+      const stepId = "skills";
+      const previous = ensureStep(api, stepId, "使用 Skill");
+      const line = `- ${item.displayName}${item.skill === item.displayName ? "" : `（${item.skill}）`}`;
+      const content = previous.content?.includes(line)
+        ? previous.content
+        : [previous.content, line].filter(Boolean).join("\n");
+      api.setStep(stepId, item.status === "failed" ? "error" : "done", content);
+      useAgentSessionStore().setInvokedSkills([
+        ...useAgentSessionStore().invokedSkills.filter(
+          (skill) => skill.skillName !== item.skill,
+        ),
+        { skillName: item.skill, invokedAt: event.at },
+      ]);
+      return;
+    }
+    if (item.type === "tool_call" || item.type === "knowledge_search") {
+      const name = item.type === "tool_call" ? item.tool : item.tool;
+      const stepId = ensureLaneForTool(api, name, lookup);
+      api.appendToolCallsToStep(stepId, [canonicalToolCall(item)]);
+      if (item.status === "completed" || item.status === "failed") {
+        completeStepIfPresent(api, stepId);
+      }
+      return;
+    }
+    if (item.type === "memory") {
+      setTransitionStep(
+        api,
+        SPOTLIGHT_PIPELINE_STEP_IDS.understand,
+        "理解问题",
+        item.action === "reuse" ? "done" : "active",
+        item.summary,
+      );
+      return;
+    }
+    if (item.type === "agent_message") {
+      completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.understand);
+      completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.gather);
+      completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.act);
+      ensureStep(api, SPOTLIGHT_PIPELINE_STEP_IDS.answer, "回答");
+      api.setStep(SPOTLIGHT_PIPELINE_STEP_IDS.answer, "done", item.text.trim());
+      return;
+    }
+    if (item.type === "error") {
+      api.setError(item.message);
+    }
+    return;
+  }
+  if (event.type === "turn.failed") {
+    api.setError(event.error.message);
+  }
+}
+
 async function postHostResult(params: {
   runId: string;
   correlationId: string;
@@ -692,7 +826,7 @@ export async function warmupSpotlightRemoteContext(
   signal?: AbortSignal,
 ): Promise<void> {
   await Promise.allSettled([
-    ensureHostToolsManifest(signal),
+    getSpotlightAppClient().initialize(signal),
     ensureSpotlightMeta(signal),
   ]);
 }
@@ -710,9 +844,8 @@ async function buildRemotePayload(
     hostManifest,
     payload: {
       projectId: getSpotlightProjectId(),
-      sessionId: session.sessionId,
+      input: userQuestion,
       memorySubjectId: getSpotlightConfig().getMemorySubjectId?.() ?? undefined,
-      userQuestion,
       memoryRefreshRequested: options?.forceMemoryRefresh === true,
       uiContext: getSpotlightConfig().getUiContext?.() ?? {},
       sessionState: {
@@ -751,7 +884,6 @@ export async function runRemoteSpotlightPipeline(
   api: HandlerApi,
   options?: { forceMemoryRefresh?: boolean },
 ): Promise<SpotlightPipelineRunOutcome> {
-  const base = getSpotlightServerBase();
   const signal = api.getSignal();
   const { payload, hostManifest } = await buildRemotePayload(
     userQuestion,
@@ -764,98 +896,68 @@ export async function runRemoteSpotlightPipeline(
       hostManifest.tools.map((tool) => [tool.name, tool.sideEffect]),
     ),
   };
-  const createResponse = await fetch(`${base}/v1/runs`, {
-    method: "POST",
-    headers: buildSpotlightJsonHeaders(),
-    body: JSON.stringify(payload),
-    signal,
-  });
-  if (!createResponse.ok) {
-    const text = await createResponse.text().catch(() => "");
-    throw new Error(
-      `Spotlight 后端创建 run 失败：${createResponse.status} ${text}`,
-    );
-  }
-  const { runId } = (await createResponse.json()) as { runId: string };
+  const client = getSpotlightAppClient();
+  const session = useAgentSessionStore();
+  const thread = await client.startThread(session.sessionId, signal);
+  const turn = await client.startTurn(thread.id, payload, signal);
   if (signal) {
-    activeRunBySignal.set(signal, runId);
+    activeRunBySignal.set(signal, turn.id);
     signal.addEventListener(
       "abort",
       () => {
-        void cancelRemoteSpotlightRun(runId);
+        void client.cancelTurn(turn.id);
       },
       { once: true },
     );
   }
-  // The run outlives any single connection, so a dropped stream is resumed from
-  // the last sequence number rather than restarting or failing the turn.
-  let lastSeq = 0;
-  let reconnects = 0;
-  while (true) {
-    const response = await openRunEventStream(runId, lastSeq, signal);
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    let streamEnded = false;
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          streamEnded = true;
-          break;
-        }
-        buffer += decoder.decode(value, { stream: true });
-        const parsed = parseSseChunk(buffer);
-        buffer = parsed.rest;
-        for (const event of parsed.events) {
-          if (typeof event.seq === "number") lastSeq = event.seq;
-          if (event.type === "host_action_request") {
-            beginHostToolCall(api, event.request.call, lookup);
-            const result = await executeRemoteHostTool(event.request.call, api, {
-              allowedHostNames,
-              hostEffect: event.request.hostEffect,
-            });
-            settleHostToolCall(api, event.request.call, result, lookup);
-            await postHostResult({
-              runId,
-              correlationId: event.request.correlationId,
-              result,
-              signal,
-            });
-            continue;
-          }
-          if (event.type === "run_error") {
-            throw new Error(event.error);
-          }
-          await applyRemoteEvent(api, event, lookup);
-          await paintYield();
-          if (event.type === "run_completed") {
-            if (event.sessionPatch) {
-              useAgentSessionStore().applySessionPatch(event.sessionPatch);
-            }
-            return {
-              command: null,
-              memoryReplay: event.memoryReplay ?? null,
-              memoryDecision: event.memoryDecision ?? null,
-              assistantReply: event.assistantReply,
-            };
-          }
-        }
-      }
-    } catch (error) {
-      if (signal?.aborted) throw error;
-      if (!isTransportError(error)) throw error;
-      streamEnded = true;
-    } finally {
-      reader.releaseLock();
+  for await (const event of client.streamTurn(turn.id, signal)) {
+    await applyLifecycleEvent(api, event, lookup);
+    if (
+      (event.type === "item.started" || event.type === "item.updated") &&
+      event.item.type === "tool_call" &&
+      event.item.status === "waiting_for_client" &&
+      event.item.clientRequest
+    ) {
+      const call = {
+        id: event.item.id,
+        name: event.item.tool,
+        input: event.item.arguments,
+        displayName: event.item.displayName,
+      };
+      const result = await executeRemoteHostTool(call, api, {
+        allowedHostNames,
+      });
+      settleHostToolCall(api, call, result, lookup);
+      await client.submitToolResult(turn.id, {
+        correlationId: event.item.clientRequest.correlationId,
+        success: result.success,
+        output: result.data,
+        error: result.error,
+        errorCode: result.errorCode,
+        trace: result.trace,
+        uiContext: getSpotlightConfig().getUiContext?.() ?? undefined,
+      }, signal);
+      continue;
     }
-    if (!streamEnded || signal?.aborted) return { command: null };
-    reconnects += 1;
-    if (reconnects > SSE_RECONNECT_ATTEMPTS) {
-      throw new Error("Spotlight 后端事件流多次重连失败，请重试。");
+    await paintYield();
+    if (event.type === "turn.failed") {
+      throw new Error(event.error.message);
     }
-    await wait(reconnectDelay(reconnects - 1));
+    if (event.type === "turn.completed") {
+      const metadata = event.metadata ?? {};
+      const sessionPatch = metadata.sessionPatch as Parameters<
+        ReturnType<typeof useAgentSessionStore>["applySessionPatch"]
+      >[0] | undefined;
+      if (sessionPatch) session.applySessionPatch(sessionPatch);
+      return {
+        command: null,
+        memoryReplay: (metadata.memoryReplay as SpotlightPipelineRunOutcome["memoryReplay"]) ?? null,
+        memoryDecision: (metadata.memoryDecision as SpotlightPipelineRunOutcome["memoryDecision"]) ?? null,
+        assistantReply: event.finalResponse,
+      };
+    }
   }
+  return { command: null };
 }
 
 /** A closed socket is recoverable; anything the server told us is not. */
@@ -864,13 +966,7 @@ function isTransportError(error: unknown): boolean {
 }
 
 export async function cancelRemoteSpotlightRun(runId: string) {
-  await fetch(
-    `${getSpotlightServerBase()}/v1/runs/${encodeURIComponent(runId)}`,
-    {
-      method: "DELETE",
-      headers: buildSpotlightJsonHeaders(),
-    },
-  );
+  await getSpotlightAppClient().cancelTurn(runId);
 }
 
 export function cancelRemoteSpotlightRunForSignal(signal?: AbortSignal) {

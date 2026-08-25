@@ -115,6 +115,7 @@ describe("run lifecycle across connections", () => {
     expect(seen.map((event) => event.seq)).toEqual(
       seen.map((_, index) => index + 1),
     );
+    expect(runs.cancelRun(run.id)).toBe(false);
   });
 
   it("resumes a reconnecting reader from its cursor instead of replaying the turn", async () => {
@@ -244,6 +245,90 @@ describe("run lifecycle across connections", () => {
     expect(completed.summary.toolCalls).toBeGreaterThan(0);
     expect(completed.summary.steps).toBe(completed.summary.toolCalls);
     expect(completed.summary.hostDispatches).toBeGreaterThan(0);
+  });
+});
+
+describe("Thread / Turn / Item lifecycle API", () => {
+  it("runs a browser Tool and exposes structured Skill and Tool items", async () => {
+    const runs = manager(actionDecision);
+    const app = await buildServer({ runManager: runs, projectId: "test-project" });
+    try {
+      const threadResponse = await app.inject({
+        method: "POST",
+        url: "/v1/threads",
+        payload: { projectId: "test-project", threadId: "thread-e2e" },
+      });
+      expect(threadResponse.statusCode).toBe(200);
+
+      const { userQuestion: _userQuestion, ...request } = runRequest(
+        "打开1号洞口的视频监控",
+      );
+      const turnResponse = await app.inject({
+        method: "POST",
+        url: "/v1/threads/thread-e2e/turns",
+        payload: { ...request, input: "打开1号洞口的视频监控" },
+      });
+      expect(turnResponse.statusCode).toBe(200);
+      const turnId = turnResponse.json().turn.id as string;
+
+      let actionRequest: Extract<
+        SpotlightServerRunEvent,
+        { type: "host_action_request" }
+      > | undefined;
+      const events: SpotlightServerRunEvent[] = [];
+      runs.subscribe(turnId, (event) => {
+        events.push(event);
+        if (event.type === "host_action_request") actionRequest = event;
+      });
+      await waitFor(() => actionRequest !== undefined);
+
+      const toolResult = await app.inject({
+        method: "POST",
+        url: `/v1/turns/${turnId}/tool-results`,
+        payload: {
+          correlationId: actionRequest!.request.correlationId,
+          success: true,
+          output: { opened: "1号洞口" },
+          uiContext: { route: "/tunnel", activeVideoChannel: "1号洞口" },
+        },
+      });
+      expect(toolResult.statusCode).toBe(200);
+      await waitFor(() => events.some((event) => event.type === "run_completed"));
+
+      const stream = await app.inject({
+        method: "GET",
+        url: `/v1/turns/${turnId}/events`,
+      });
+      expect(stream.statusCode).toBe(200);
+      const lifecycleEvents = stream.body
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)) as Record<string, unknown>);
+      const items = lifecycleEvents
+        .filter((event) => event.type === "item.completed")
+        .map((event) => event.item as Record<string, unknown>);
+
+      expect(lifecycleEvents[0]).toMatchObject({
+        type: "turn.started",
+        threadId: "thread-e2e",
+        turnId,
+      });
+      expect(items).toContainEqual(expect.objectContaining({
+        type: "skill_use",
+        skill: "skill.monitoring",
+      }));
+      expect(items).toContainEqual(expect.objectContaining({
+        type: "tool_call",
+        tool: openVideo.name,
+        status: "completed",
+      }));
+      expect(lifecycleEvents.at(-1)).toMatchObject({
+        type: "turn.completed",
+        turn: { id: turnId, threadId: "thread-e2e", status: "completed" },
+      });
+    } finally {
+      await app.close();
+    }
   });
 });
 

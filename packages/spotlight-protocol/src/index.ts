@@ -4,6 +4,7 @@ import type { FrontendToolManifestV1 } from "./capabilities.js";
 
 export * from "./capabilities.js";
 export * from "./capabilitySecurity.js";
+export * from "./lifecycle.js";
 
 export type ToolExecutionTarget = "runtime" | "host";
 
@@ -127,12 +128,41 @@ export type AssetType =
 export type SpotlightSkillResponseStrategy =
   "direct_answer" | "tool_answer" | "clarify";
 
+export interface SpotlightSkillToolDependency {
+  type: "browser" | "server" | "mcp" | string;
+  value: string;
+  description?: string;
+  transport?: string;
+  url?: string;
+}
+
+export interface SpotlightSkillDependencies {
+  tools: Array<string | SpotlightSkillToolDependency>;
+}
+
+export interface SpotlightSkillPolicy {
+  allowImplicitInvocation?: boolean;
+}
+
+export interface SpotlightSkillInterface {
+  displayName?: string;
+  shortDescription?: string;
+  iconSmall?: string;
+  iconLarge?: string;
+  brandColor?: string;
+  defaultPrompt?: string;
+}
+
 export interface SpotlightSkill {
   name: string;
   displayName?: string;
   description: string;
   whenToUse?: string;
   allowedTools?: string[];
+  /** Codex-style capability requirements. Prefer this for new Skills. */
+  dependencies?: SpotlightSkillDependencies;
+  policy?: SpotlightSkillPolicy;
+  interface?: SpotlightSkillInterface;
   argumentHint?: string;
   argNames?: string[];
   keywords?: string[];
@@ -157,6 +187,15 @@ export interface SpotlightSkill {
   sourcePath?: string;
   /** Skill 目录（相对项目根或绝对路径），用于 scripts/ 与占位符 */
   skillRoot?: string;
+}
+
+export function spotlightSkillToolNames(
+  skill: Pick<SpotlightSkill, "allowedTools" | "dependencies">,
+): string[] {
+  const dependencies = skill.dependencies?.tools.map((tool) =>
+    typeof tool === "string" ? tool : tool.value,
+  ) ?? [];
+  return Array.from(new Set([...dependencies, ...(skill.allowedTools ?? [])]));
 }
 
 export interface SpotlightCommandCatalogAction {
@@ -215,6 +254,18 @@ export interface CreateRunRequest {
 
 export interface CreateRunResponse {
   runId: string;
+}
+
+/** Codex-style turn input. The server binds it to the thread in the URL. */
+export type SpotlightTurnStartRequest = Omit<
+  CreateRunRequest,
+  "sessionId" | "userQuestion"
+> & {
+  input: string;
+};
+
+export interface SpotlightTurnStartResponse {
+  turn: import("./lifecycle.js").SpotlightTurn;
 }
 
 export interface HostToolResultRequest {

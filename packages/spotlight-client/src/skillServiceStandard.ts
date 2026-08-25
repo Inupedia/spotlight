@@ -32,6 +32,18 @@ function asStringList(value: unknown): string[] {
   return [];
 }
 
+function dependencyToolNames(value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const tools = (value as { tools?: unknown }).tools;
+  if (!Array.isArray(tools)) return [];
+  return tools.flatMap((tool) => {
+    if (typeof tool === "string") return tool.trim() ? [tool.trim()] : [];
+    if (!tool || typeof tool !== "object") return [];
+    const name = (tool as { value?: unknown }).value;
+    return typeof name === "string" && name.trim() ? [name.trim()] : [];
+  });
+}
+
 /**
  * Validate skill frontmatter against Spotlight + Agent Skills conventions.
  * Use in CI or local skill authoring tools.
@@ -78,12 +90,17 @@ export function validateSkillFrontmatter(
         ? data["response-strategy"]
         : "";
   const allowedTools = asStringList(data["allowed-tools"]);
+  const dependencyTools = dependencyToolNames(data.dependencies);
 
-  if (strategy === "tool_answer" && allowedTools.length === 0) {
+  if (
+    strategy === "tool_answer" &&
+    allowedTools.length === 0 &&
+    dependencyTools.length === 0
+  ) {
     issues.push({
       level: "error",
       message:
-        "spotlight-response-strategy: tool_answer 时必须声明 allowed-tools",
+        "spotlight-response-strategy: tool_answer 时必须声明 dependencies.tools（旧版 allowed-tools 也可）",
     });
   }
 

@@ -1,6 +1,7 @@
-import type {
-  FrontendToolDescriptorV1,
-  SpotlightSkill,
+import {
+  spotlightSkillToolNames,
+  type FrontendToolDescriptorV1,
+  type SpotlightSkill,
 } from "@inupedia/spotlight-protocol";
 
 const MAX_SKILLS_PER_RUN = 32;
@@ -50,9 +51,12 @@ export function prepareRunSkills(
       displayName: compact(raw.displayName, 120),
       description,
       whenToUse: compact(raw.whenToUse, 800),
-      allowedTools: raw.allowedTools?.filter((tool) =>
+      allowedTools: spotlightSkillToolNames(raw).filter((tool) =>
         registeredTools.has(tool),
       ),
+      dependencies: raw.dependencies,
+      policy: raw.policy,
+      interface: raw.interface,
       capabilityExamples: raw.capabilityExamples
         ?.map((item) => item.trim())
         .filter(Boolean)

@@ -210,6 +210,60 @@ function pickHooks(
   return undefined;
 }
 
+function pickDependencies(
+  data: Record<string, unknown>,
+): SpotlightSkill["dependencies"] {
+  const raw = data.dependencies;
+  if (!isPlainObject(raw) || !Array.isArray(raw.tools)) return undefined;
+  const tools: NonNullable<SpotlightSkill["dependencies"]>["tools"] = [];
+  for (const tool of raw.tools) {
+    if (typeof tool === "string" && tool.trim()) {
+      tools.push(tool.trim());
+      continue;
+    }
+    if (!isPlainObject(tool)) continue;
+    const value = pickStr(tool, "value", "name");
+    if (!value) continue;
+    tools.push({
+      type: pickStr(tool, "type") ?? "browser",
+      value,
+      description: pickStr(tool, "description"),
+      transport: pickStr(tool, "transport"),
+      url: pickStr(tool, "url"),
+    });
+  }
+  return tools.length ? { tools } : undefined;
+}
+
+function pickPolicy(data: Record<string, unknown>): SpotlightSkill["policy"] {
+  const raw = data.policy;
+  if (!isPlainObject(raw)) return undefined;
+  const allowImplicitInvocation = pickBool(
+    raw,
+    "allow_implicit_invocation",
+    "allowImplicitInvocation",
+  );
+  return allowImplicitInvocation === undefined
+    ? undefined
+    : { allowImplicitInvocation };
+}
+
+function pickInterface(
+  data: Record<string, unknown>,
+): SpotlightSkill["interface"] {
+  const raw = data.interface;
+  if (!isPlainObject(raw)) return undefined;
+  const result = {
+    displayName: pickStr(raw, "display_name", "displayName"),
+    shortDescription: pickStr(raw, "short_description", "shortDescription"),
+    iconSmall: pickStr(raw, "icon_small", "iconSmall"),
+    iconLarge: pickStr(raw, "icon_large", "iconLarge"),
+    brandColor: pickStr(raw, "brand_color", "brandColor"),
+    defaultPrompt: pickStr(raw, "default_prompt", "defaultPrompt"),
+  };
+  return Object.values(result).some(Boolean) ? result : undefined;
+}
+
 function inferSkillIdFromSkillPath(sourcePath: string): string | undefined {
   const parts = sourcePath.replace(/\\/g, "/").split("/").filter(Boolean);
   const last = parts[parts.length - 1];
@@ -255,6 +309,12 @@ export function parseSpotlightSkillMarkdownFields(
   if (whenToUse) skill.whenToUse = whenToUse;
   const allowed = pickStrList(data, "allowed-tools", "allowedTools");
   if (allowed) skill.allowedTools = allowed;
+  const dependencies = pickDependencies(data);
+  if (dependencies) skill.dependencies = dependencies;
+  const policy = pickPolicy(data);
+  if (policy) skill.policy = policy;
+  const skillInterface = pickInterface(data);
+  if (skillInterface) skill.interface = skillInterface;
   const argumentHint = pickStr(data, "argument-hint", "argumentHint");
   if (argumentHint) skill.argumentHint = argumentHint;
   const argNames = pickStrList(

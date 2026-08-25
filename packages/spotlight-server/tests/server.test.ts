@@ -30,4 +30,70 @@ describe("Spotlight Server metadata", () => {
       await app.close();
     }
   });
+
+  it("negotiates Tool and Skill readiness before a Turn starts", async () => {
+    const app = await buildServer({
+      runManager: {
+        listServerToolNames: () => ["project_knowledge_search"],
+      } as unknown as RunManager,
+      projectId: "test-project",
+    });
+
+    try {
+      const response = await app.inject({
+        method: "POST",
+        url: "/v1/initialize",
+        payload: {
+          protocolVersion: "spotlight.app/1",
+          projectId: "test-project",
+          clientInfo: { name: "test", version: "1" },
+          capabilities: {
+            transports: ["sse"],
+            itemTypes: ["tool_call"],
+            toolResultSubmission: true,
+            reconnectFromSequence: true,
+          },
+          toolManifest: {
+            protocolVersion: "spotlight.capabilities/1",
+            projectId: "test-project",
+            frontendBuildId: "sha",
+            manifestDigest: "digest",
+            tools: [{
+              name: "panel.openVideo",
+              version: "1",
+              description: "打开视频",
+              inputSchema: { type: "object" },
+              sideEffect: "ui",
+              replayPolicy: "never",
+            }],
+          },
+          skills: [
+            {
+              name: "video",
+              description: "视频监控",
+              dependencies: { tools: ["panel.openVideo"] },
+            },
+            {
+              name: "broken",
+              description: "缺失依赖",
+              dependencies: { tools: ["panel.notRegistered"] },
+            },
+          ],
+        },
+      });
+
+      expect(response.statusCode).toBe(200);
+      expect(response.json()).toMatchObject({
+        protocolVersion: "spotlight.app/1",
+        acceptedManifestDigest: "digest",
+        tools: [{ name: "panel.openVideo", status: "ready" }],
+        skills: [
+          { name: "video", status: "ready", missingTools: [] },
+          { name: "broken", status: "missing", missingTools: ["panel.notRegistered"] },
+        ],
+      });
+    } finally {
+      await app.close();
+    }
+  });
 });

@@ -1,8 +1,11 @@
 import type { App, InjectionKey } from "vue";
 import {
+  createClientToolManifest,
   createClientToolRegistry,
+  createSpotlightAppClient,
   createSpotlightHttp,
   type ClientTool,
+  type SpotlightAppClient,
   type SpotlightHttp,
 } from "@inupedia/spotlight-client";
 import {
@@ -13,16 +16,20 @@ import {
 } from "./config.js";
 import { mountSpotlightShell, unmountSpotlightShellForTests } from "./mountShell.js";
 import type { SpotlightAvatarConfig } from "./avatar/config.js";
+import { spotlightSkillToolNames } from "@inupedia/spotlight-protocol";
 
 export const SPOTLIGHT_HTTP_KEY: InjectionKey<SpotlightHttp> =
   Symbol("spotlight-http");
 export type SpotlightClientToolRegistry = ReturnType<typeof createClientToolRegistry>;
 export const SPOTLIGHT_CLIENT_TOOLS_KEY: InjectionKey<SpotlightClientToolRegistry> =
   Symbol("spotlight-client-tools");
+export const SPOTLIGHT_APP_CLIENT_KEY: InjectionKey<SpotlightAppClient> =
+  Symbol("spotlight-app-client");
 
 let installedConfig: SpotlightConfig | null = null;
 let installedHttp: SpotlightHttp | null = null;
 let installedClientTools: SpotlightClientToolRegistry | null = null;
+let installedAppClient: SpotlightAppClient | null = null;
 
 export function getSpotlightConfig(): SpotlightConfig {
   if (!installedConfig) {
@@ -50,18 +57,30 @@ export function getSpotlightClientTools(): SpotlightClientToolRegistry {
   return installedClientTools;
 }
 
+export function getSpotlightAppClient(): SpotlightAppClient {
+  if (!installedAppClient) {
+    throw new Error(
+      "Spotlight App Client is not initialized. Call app.use(SpotlightVue, { config })",
+    );
+  }
+  return installedAppClient;
+}
+
 /** Reset singletons (tests / HMR). */
 export function resetSpotlightRuntimeForTests(): void {
   unmountSpotlightShellForTests();
   installedConfig = null;
   installedHttp = null;
   installedClientTools = null;
+  installedAppClient = null;
 }
 
 export const SpotlightVue = {
   install(appValue: unknown, options: SpotlightVuePluginOptions): void {
     const app = appValue as App;
-    const config = defineSpotlightConfig(options.config);
+    const config = defineSpotlightConfig(
+      "config" in options && options.config ? options.config : options,
+    );
     const resolvedTools =
       typeof config.tools === "function" ? config.tools() : config.tools;
     if (!Array.isArray(resolvedTools) || resolvedTools.length === 0) {
@@ -72,10 +91,43 @@ export const SpotlightVue = {
     installedConfig = config;
     installedHttp = createSpotlightHttp(config);
     installedClientTools = createClientToolRegistry(resolvedTools);
+    const frontendBuildId = config.frontendBuildId?.trim() || "development";
+    installedAppClient = createSpotlightAppClient({
+      serverUrl: config.serverUrl,
+      apiKey: config.apiKey,
+      projectId: config.projectId,
+      clientInfo: {
+        name: "spotlight-vue",
+        title: "Spotlight Vue",
+        version: "0.7.0",
+      },
+      toolManifest: () => createClientToolManifest({
+        projectId: config.projectId,
+        frontendBuildId,
+        tools: resolvedTools,
+      }),
+      skills: () => {
+        const skills = config.getSkillsForRun?.()
+          ?? (typeof config.skills === "function" ? config.skills() : config.skills)
+          ?? [];
+        return skills.map((skill) => ({
+          name: skill.name,
+          displayName: skill.interface?.displayName ?? skill.displayName,
+          description: skill.description,
+          version: skill.version,
+          allowImplicitInvocation:
+            skill.policy?.allowImplicitInvocation
+            ?? skill.disableModelInvocation !== true,
+          userInvocable: skill.userInvocable,
+          dependencies: { tools: spotlightSkillToolNames(skill) },
+        }));
+      },
+    });
 
     app.provide(SPOTLIGHT_CONFIG_KEY, config);
     app.provide(SPOTLIGHT_HTTP_KEY, installedHttp);
     app.provide(SPOTLIGHT_CLIENT_TOOLS_KEY, installedClientTools);
+    app.provide(SPOTLIGHT_APP_CLIENT_KEY, installedAppClient);
 
     app.config.globalProperties.$spotlightEnabled = options.enabled !== false;
     app.config.globalProperties.$spotlightAvatarEnabled =

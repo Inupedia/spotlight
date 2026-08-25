@@ -20,7 +20,7 @@ export default defineSpotlightConfig({
 import { SpotlightVue } from "@inupedia/spotlight-vue";
 import spotlightConfig from "./spotlight.config";
 
-app.use(SpotlightVue, { config: spotlightConfig });
+app.use(SpotlightVue, spotlightConfig);
 ```
 
 完整示例见 [Client Tool 接入指南](../../docs/client-tools.md)。

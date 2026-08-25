@@ -15,6 +15,7 @@ import type { MemoryGate } from "@inupedia/spotlight-memory/node";
 import type {
   HostActionBridge,
   HostActionCall,
+  IntentDecision,
   ProjectPack,
   RunContext,
   SpotlightToolCallInfo,
@@ -46,6 +47,7 @@ export type SpotlightServerRunEventBody =
       turnId: string;
       phase: string;
       summary?: string;
+      matchedSkillNames?: string[];
     }
   | { type: "assistant_response"; at: number; iteration: number; content: string }
   | {
@@ -152,6 +154,7 @@ interface RunState {
   toolCalls: number;
   hostDispatches: number;
   hostRedispatches: number;
+  matchedSkillNames: string[];
   watchdog: NodeJS.Timeout | null;
 }
 
@@ -180,6 +183,15 @@ export class RunManager {
 
   constructor(private readonly options: RunManagerOptions) {}
 
+  listServerToolNames(): string[] {
+    return [
+      "skill.invoke",
+      "knowledge.answer",
+      "knowledge.searchWeb",
+      ...this.options.project.serverTools.map((tool) => tool.name),
+    ];
+  }
+
   createRun(request: RunRequest): { id: string } {
     const id = crypto.randomUUID();
     const sessionId = request.sessionId?.trim() || null;
@@ -199,6 +211,7 @@ export class RunManager {
       toolCalls: 0,
       hostDispatches: 0,
       hostRedispatches: 0,
+      matchedSkillNames: [],
       watchdog: null,
     };
     this.runs.set(id, run);
@@ -439,7 +452,7 @@ export class RunManager {
 
   cancelRun(id: string): boolean {
     const run = this.runs.get(id);
-    if (!run) return false;
+    if (!run || isTerminalStatus(run.status)) return false;
     run.controller.abort(new Error("Run cancelled"));
     this.stopWatchdog(run);
     for (const pending of run.pending.values()) {
@@ -488,7 +501,12 @@ export class RunManager {
             turnId,
             phase,
             summary,
+            matchedSkillNames:
+              phase === "router_done" ? run.matchedSkillNames : undefined,
           }),
+        onDecision: (decision: IntentDecision) => {
+          run.matchedSkillNames = [...(decision.matchedSkillNames ?? [])];
+        },
         onTool: (event: SpotlightGraphToolEvent) => {
           if (event.type === "tool_start") {
             run.step += 1;

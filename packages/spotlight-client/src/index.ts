@@ -42,3 +42,4 @@ export {
   joinSkillScriptPath,
   type SkillScriptRunResult,
 } from "./skillScriptPath.js";
+export * from "./appClient.js";

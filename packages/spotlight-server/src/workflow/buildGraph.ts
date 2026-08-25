@@ -394,6 +394,7 @@ export function compileSpotlightWorkflow(
           observedStateForRouter(observation()),
         ),
       );
+      options.onDecision?.(decision);
       const chain = matchedSkillDeclaresChain(
         runSkills,
         decision.matchedSkillNames,

@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { createPinia, setActivePinia } from "pinia";
 import {
+  applyLifecycleEvent,
   applyLangGraphTransition,
   applyRemoteEvent,
   beginHostToolCall,
@@ -11,6 +13,8 @@ import type { HandlerApi } from "../src/store/pipeline/types.js";
 import type { AgentStep } from "../src/store/types.js";
 import type { SpotlightExecutionEvent } from "../src/store/runtime/types.js";
 import { resolveToolLane } from "../src/store/pipeline/toolLane.js";
+
+beforeEach(() => setActivePinia(createPinia()));
 
 function createApi() {
   let steps: AgentStep[] = [];
@@ -402,5 +406,66 @@ describe("LangGraph progress steps", () => {
         status: "done",
       }),
     ]);
+  });
+});
+
+describe("Thread / Turn / Item progress", () => {
+  it("shows the selected Skill and exact Tool without LangGraph phase names", async () => {
+    const { api, getSteps } = createApi();
+    await applyLifecycleEvent(api, {
+      type: "turn.started",
+      at: 1,
+      seq: 1,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      turn: { id: "turn-1", threadId: "thread-1", status: "in_progress", startedAt: 1 },
+    });
+    await applyLifecycleEvent(api, {
+      type: "item.completed",
+      at: 2,
+      seq: 2,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "skill-1",
+        type: "skill_use",
+        skill: "skill.monitoring",
+        displayName: "视频监控",
+        source: "router",
+        status: "completed",
+        startedAt: 2,
+        completedAt: 2,
+      },
+    });
+    await applyLifecycleEvent(api, {
+      type: "item.started",
+      at: 3,
+      seq: 3,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "call-1",
+        type: "tool_call",
+        tool: "panel.openVideo",
+        displayName: "打开视频",
+        target: "browser",
+        arguments: { name: "泸定取水口" },
+        status: "in_progress",
+        startedAt: 3,
+      },
+    });
+
+    expect(getSteps()).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        label: "使用 Skill",
+        content: "- 视频监控（skill.monitoring）",
+        status: "done",
+      }),
+      expect.objectContaining({
+        label: "操作页面",
+        toolCalls: [expect.objectContaining({ name: "panel.openVideo" })],
+      }),
+    ]));
+    expect(JSON.stringify(getSteps())).not.toContain("router_done");
   });
 });

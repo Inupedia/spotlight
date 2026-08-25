@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-protocol",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Shared wire types for Inupedia Spotlight (client ↔ server)",
   "type": "module",
   "license": "MIT",

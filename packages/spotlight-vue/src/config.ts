@@ -71,8 +71,7 @@ export const SPOTLIGHT_CONFIG_KEY = Symbol("spotlight-config");
 
 import type { SpotlightAvatarConfig } from "./avatar/config.js";
 
-export type SpotlightVuePluginOptions = {
-  config: SpotlightConfig;
+export type SpotlightVueUiOptions = {
   /** Mount command panel + thinking UI (default: true). */
   enabled?: boolean;
   /** Enable digital-human overlay, ⌘/Ctrl+L, and answer TTS (default: false). */
@@ -80,3 +79,8 @@ export type SpotlightVuePluginOptions = {
   /** Avatar copy + Spine asset paths (when avatarEnabled). */
   avatar?: SpotlightAvatarConfig;
 };
+
+/** `app.use(SpotlightVue, config)` is preferred; nested config remains source-compatible. */
+export type SpotlightVuePluginOptions =
+  | (SpotlightVueUiOptions & { config: SpotlightConfig })
+  | (SpotlightConfig & SpotlightVueUiOptions & { config?: never });

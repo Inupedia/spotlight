@@ -3,6 +3,7 @@ import type { BaseCheckpointSaver, BaseStore } from "@langchain/langgraph";
 import type { ToolTraceEvent } from "@inupedia/spotlight-protocol";
 import type { SpotlightToolCallInfo } from "../contracts.js";
 import type { IntentRouter } from "../router.js";
+import type { IntentDecision } from "../contracts.js";
 
 export type SpotlightGraphToolEvent =
   | { type: "tool_start"; call: SpotlightToolCallInfo }
@@ -26,6 +27,7 @@ export interface SpotlightGraphOptions {
   checkpointer: BaseCheckpointSaver;
   store: BaseStore;
   onPhase?: (phase: string, summary: string) => void;
+  onDecision?: (decision: IntentDecision) => void;
   onTool?: (event: SpotlightGraphToolEvent) => void;
 }
 

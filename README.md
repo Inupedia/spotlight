@@ -18,7 +18,7 @@ Spotlight is inspired by the interaction model behind **Apple's Spotlight**: sta
 
 We think frontend products are moving in the same direction. Users should not have to learn where every feature, page, report, control, or workflow lives before they can get work done. A modern product should offer one intelligent command surface that can **search, navigate, explain, and act** across the capabilities already inside it.
 
-Spotlight turns that idea into a framework-agnostic agent runtime for existing frontend products. It does not ask you to rebuild the UI or create a second “agent version” of the product. Instead, it connects natural-language intent to real Router / Store / Service / SDK capabilities through typed Client Tools, Skills, LangGraph, Knowledge, Memory, and recoverable Runs.
+Spotlight turns that idea into a framework-agnostic agent runtime for existing frontend products. It does not ask you to rebuild the UI or create a second “agent version” of the product. Instead, it connects natural-language intent to real Router / Store / Service / SDK capabilities through typed Client Tools, Skills, LangGraph, Knowledge, Memory, and recoverable Threads / Turns.
 
 <p align="center">
   <img src="./assets/readme/demo.gif" width="100%" alt="Spotlight recognizes a request to view a camera and opens the matching live video in the host product">
@@ -42,7 +42,7 @@ The architecture deliberately keeps product execution and agent orchestration se
 | --- | --- |
 | Stable Router / Store / Service / SDK capabilities | Client Tool protocol and runtime invocation |
 | Business-facing Skills that describe when tools should be used | Skill routing, Knowledge, Actions, and multi-step orchestration |
-| `projectId`, Server URL, and stable user identity | Session state, long-term memory, Run lifecycle, and SSE recovery |
+| `projectId`, Server URL, and stable user identity | Session state, long-term memory, Thread / Turn / Item lifecycle, and SSE recovery |
 | Existing permissions, state, and business constraints | Runtime coordination, reconnect behavior, and execution boundaries |
 
 Spotlight does not move business logic into the runtime. It creates a reliable execution layer **between user intent and real product capabilities**.
@@ -140,7 +140,7 @@ import App from "./App.vue";
 import spotlightConfig from "./spotlight/config";
 
 createApp(App)
-  .use(SpotlightVue, { config: spotlightConfig })
+  .use(SpotlightVue, spotlightConfig)
   .mount("#app");
 ```
 
@@ -165,7 +165,7 @@ Spotlight Runtime remains responsible for:
 
 - Skills
 - LangGraph routing and planning
-- Run lifecycle and SSE coordination
+- Thread / Turn / Item lifecycle and SSE coordination
 - Knowledge / RAG
 - Memory
 - model / provider integrations
@@ -187,15 +187,25 @@ The goal is not to let the agent click everything. The goal is to expose **real,
 
 [`docs/design/capability-protocol-v2.md`](./docs/design/capability-protocol-v2.md) describes a further capability-tier and replay design, but that document is explicitly marked as a **deferred design** and should not be treated as shipped runtime behavior.
 
-## Runs and reconnect
+## Thread / Turn / Item and reconnect
 
-A Spotlight **Run** is not tied to one SSE connection.
+A Spotlight conversation uses three stable primitives:
+
+- **Thread** — one resumable conversation.
+- **Turn** — one user request through completion, failure, or interruption.
+- **Item** — a typed unit such as Skill use, Tool call, knowledge search, reasoning summary, Memory decision, or final message.
+
+The frontend never consumes LangGraph node names or routing phases. It receives
+`turn.started`, `item.started`, `item.updated`, `item.completed`,
+`turn.completed`, and `turn.failed`.
+
+A Spotlight **Turn** is not tied to one SSE connection.
 
 - Each event carries a sequence number.
 - Reconnects can continue from `Last-Event-ID` (or `?lastEventId=`) instead of re-running the whole turn.
 - A browser disconnect can move a run into `waiting_for_host` rather than failing it immediately.
 - When the host returns, unfinished browser-side work can continue.
-- Expired runs return `410`, allowing clients to stop retrying.
+- Expired Turns return `410`, allowing clients to stop retrying.
 - After each tool execution, the browser can return fresh `uiContext`, so the next agent step sees the state **after** the action.
 
 This gives multi-step product execution much stronger recovery semantics than restarting the entire interaction after every connection failure.
@@ -222,7 +232,7 @@ If the host cannot provide a stable user identity, Spotlight should not silently
 | Package | Role |
 | --- | --- |
 | `@inupedia/spotlight-protocol` | Shared client / server protocol |
-| `@inupedia/spotlight-client` | `defineClientTool`, HTTP client, and build-time tool manifest |
+| `@inupedia/spotlight-client` | `defineClientTool`, App Client, Thread / Turn stream, and build-time tool manifest |
 | `@inupedia/spotlight-vue` | Current Vue adapter: plugin, command UI, Skill reporting, and browser execution pipeline |
 | `@inupedia/spotlight-memory` | Memory Gate and cache-backed storage |
 | `@inupedia/spotlight-server` | Deployable LangChain / LangGraph runtime |

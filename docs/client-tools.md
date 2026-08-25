@@ -34,7 +34,7 @@ export const spotlightTools = [playVideoFullscreen, closeVideo];
 ## 1. 安装
 
 ```bash
-pnpm add @inupedia/spotlight-client@^0.5.9 @inupedia/spotlight-vue@^0.5.9
+pnpm add @inupedia/spotlight-client@^0.7.0 @inupedia/spotlight-vue@^0.7.0
 ```
 
 ## 2. 配置 Vite
@@ -92,7 +92,7 @@ import App from "./App.vue";
 import spotlightConfig from "./spotlight/config";
 
 createApp(App)
-  .use(SpotlightVue, { config: spotlightConfig })
+  .use(SpotlightVue, spotlightConfig)
   .mount("#app");
 ```
 
@@ -109,8 +109,20 @@ id: skill.monitoring
 name: 现场监控
 description: 打开、播放或关闭项目视频监控。
 when_to_use: 用户点名监控点位要求播放，或要求打开、关闭监控界面。
-allowed-tools: openVideoMonitoring, playVideoFullscreen, closeVideo
 capability-examples: 打开监控列表, 播放钢筋棚监控, 关闭监控
+interface:
+  display_name: 现场监控
+  brand_color: "#1677ff"
+dependencies:
+  tools:
+    - type: browser
+      value: openVideoMonitoring
+    - type: browser
+      value: playVideoFullscreen
+    - type: browser
+      value: closeVideo
+policy:
+  allow_implicit_invocation: true
 ---
 
 # 现场监控
@@ -145,7 +157,20 @@ export default defineSpotlightConfig({
 });
 ```
 
-SDK 会把 Skill 与当前构建的 Tool Manifest 一起发送给 Server。Server 保留业务说明，但会把 `allowed-tools` 与真实注册 Tool 求交集；Skill 不能创造权限，也不能调用另一个项目或旧版本中不存在的 Tool。
+SDK 会先通过 `initialize` 把 Skill 与当前构建的 Tool Manifest 交给 Server。Server 会返回每个 Tool / Skill 的运行状态和缺失依赖；缺失 Tool 的 Skill 不会悄悄带病运行。旧 `allowed-tools` 仍可读取，新 Skill 推荐使用 `dependencies.tools`。
+
+运行时只向前端发送稳定 Item：
+
+```text
+turn.started
+item.completed  Skill: skill.monitoring
+item.started    Tool: playVideoFullscreen
+item.completed  Tool: playVideoFullscreen
+item.completed  Agent message
+turn.completed
+```
+
+因此 UI 可以准确展示使用了哪个 Skill、哪个 Tool、参数与结果，而不需要理解 LangGraph 的节点名称。
 
 `getMemorySubjectId` 是可选项：不配置时仍有当前会话的短期 Memory，但不会保存跨会话长期记忆，避免匿名用户之间串数据。长期记忆只会在用户明确说“记住”或“忘记”时写入或删除。
 
@@ -197,9 +222,17 @@ export const switchVideoGroup = defineClientTool(
 dist/spotlight-client-manifest.json
 ```
 
-浏览器每轮携带同一份构建清单。Server 只把经过意图门禁筛选的副作用 Tool 暴露给 Action Agent，Knowledge Agent 永远看不到 Client Tool；浏览器端仍会再次检查 Tool 是否由当前构建真实注册。因此不再需要 `SPOTLIGHT_CLIENT_MANIFEST_DIR`，也不会因为容器缺少该目录而启动失败。
+浏览器初始化时提交构建清单，Server 返回已接受的 Manifest Digest 和 Tool / Skill 状态；每个 Turn 继续绑定同一份清单。Server 只把经过意图门禁筛选的副作用 Tool 暴露给 Action Agent，Knowledge Agent 永远看不到 Client Tool；浏览器端仍会再次检查 Tool 是否由当前构建真实注册。因此不再需要 `SPOTLIGHT_CLIENT_MANIFEST_DIR`，也不会因为容器缺少该目录而启动失败。
 
 Server 读取可信清单后，将 Client Tool 转为真正的 LangChain Tool。模型调用该 Tool 时，执行请求通过现有浏览器 RPC 回到对应页面。LangChain 和 LangGraph 因此属于 Server 实现细节，不增加业务项目的接入成本。
+
+## 从 0.6.x 迁移到 0.7.x
+
+1. 将五个 `@inupedia/spotlight-*` 包统一升级到 `0.7.x`，不要混装同版本号下的本地包和 Registry 旧包。
+2. Vue 接入改为 `app.use(SpotlightVue, spotlightConfig)`；SDK 自动初始化 Manifest、Skill 与 Tool 状态。
+3. Skill 使用 `dependencies.tools`、`policy`、`interface` 声明依赖和展示信息；`allowed-tools` 仅作为迁移兼容字段。
+4. 自定义前端 Tool 保持 `defineClientTool` 注册方式不变；运行过程改为消费 `Thread / Turn / Item` 事件。
+5. 旧 `/v1/runs` 接口只用于迁移兼容，新代码使用 `/v1/threads` 与 `/v1/turns`。
 
 ## 从 0.5.6 迁移到 0.5.9
 

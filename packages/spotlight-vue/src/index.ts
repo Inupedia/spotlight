@@ -13,9 +13,11 @@ export { mergeSpotlightSkills } from "./host/mergeSkills.js";
 export {
   getSpotlightConfig,
   getSpotlightClientTools,
+  getSpotlightAppClient,
   getSpotlightHttp,
   SpotlightVue,
   SPOTLIGHT_CLIENT_TOOLS_KEY,
+  SPOTLIGHT_APP_CLIENT_KEY,
   SPOTLIGHT_HTTP_KEY,
 } from "./plugin.js";
 

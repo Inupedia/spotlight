@@ -68,6 +68,11 @@ export interface SpotlightSkillFrontmatter {
   "capability-examples"?: string | string[];
   /** Entries use `user example => registeredToolName`. */
   "tool-examples"?: string | string[];
+  dependencies?: {
+    tools?: Array<string | { type: string; value: string; description?: string }>;
+  };
+  policy?: { allow_implicit_invocation?: boolean };
+  interface?: Record<string, unknown>;
 }
 
 /** Recommended service injection contract (consumer implements). */
@@ -131,4 +136,7 @@ export const SPOTLIGHT_SKILL_FRONTMATTER_KEYS = [
   "spotlight-response-strategy",
   "spotlight-asset-types",
   "capability-examples",
+  "dependencies",
+  "policy",
+  "interface",
 ] as const;
