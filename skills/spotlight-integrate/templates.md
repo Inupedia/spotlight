@@ -8,7 +8,7 @@ Use these as **shape only**. Replace names/imports with real host symbols. Never
 import { defineClientTool } from "@inupedia/spotlight-client";
 // import existing host actions/services/stores — do not invent behavior
 
-/** 列出当前资源的名称与数量。 */
+/** List current resource names and counts. */
 export const getItemList = defineClientTool(
   async (): Promise<unknown> => listItems(),
   {
@@ -18,7 +18,7 @@ export const getItemList = defineClientTool(
   },
 );
 
-/** 按用户给出的名称打开已有资源。 */
+/** Open an existing resource by the name the user provided. */
 export const openItem = defineClientTool(
   async ({ name }: { name: string }): Promise<void> => {
     await openItemByName(name);
@@ -30,7 +30,7 @@ export const openItem = defineClientTool(
   },
 );
 
-/** 对已有资源执行可逆更新。 */
+/** Apply a reversible update to an existing resource. */
 export const updateItem = defineClientTool(
   async ({ id, value }: { id: string; value: number }): Promise<void> => {
     await updateExistingItem(id, value);
@@ -52,7 +52,7 @@ Do not add destructive/high-risk examples to the default template. Such capabili
 Use only when the Vite plugin cannot safely infer a type:
 
 ```ts
-/** 切换宿主已有页签。 */
+/** Switch an existing host tab. */
 export const switchMainTab = defineClientTool(
   async ({ tab }: { tab: "overview" | "detail" }): Promise<void> => {
     await setMainTab(tab);
@@ -85,7 +85,7 @@ import { defineTool } from "@inupedia/spotlight-client";
 
 export const openItem = defineTool({
   name: "openItem",
-  description: "按用户给出的名称打开已有资源。",
+  description: "Open an existing resource by the name the user provided.",
   schema: {
     input: {
       type: "object",
@@ -112,7 +112,7 @@ import { defineResourceProvider } from "@inupedia/spotlight-client";
 
 export const itemResources = defineResourceProvider({
   namespace: "item",
-  description: "宿主项目中的资源",
+  description: "Resources in the host product",
   search: async ({ query, limit }) => ({
     items: await itemService.search(query, limit),
   }),
@@ -120,7 +120,7 @@ export const itemResources = defineResourceProvider({
   actions: {
     open: {
       toolName: "openItem",
-      description: "按名称、别名或稳定 ID 打开一个已有资源。",
+      description: "Open one existing resource by name, alias, or stable id.",
       handler: async (resource) => openItemById(resource.id),
     },
   },
@@ -203,22 +203,22 @@ app.use(SpotlightVue, { config: spotlightConfig, enabled: true });
 ```md
 ---
 id: skill.items
-name: 资源
-description: 查询资源清单，打开某个已存在名称，并执行宿主已有的可逆更新。
-when_to_use: 用户询问资源列表、明确要求打开某个资源、或要求更新资源字段时使用；介绍说明类问题不要使用。
+name: Resources
+description: Query the resource list, open an existing name, and apply a reversible host update.
+when_to_use: Use when the user asks for a resource list, clearly asks to open a resource, or asks to update a resource field. Do not use for introductions or explanations.
 allowed-tools: getItemList, openItem, updateItem
 spotlight-response-strategy: tool_answer
-capability-examples: 目前有哪些资源, 打开<exact host catalog name>, 把<real field>改为<real value>
+capability-examples: What resources are available, Open <exact host catalog name>, Change <real field> to <real value>
 tool-examples: <acceptance-critical exact utterance> => <registeredToolName>
 ---
 
-# 资源
+# Resources
 
-- 清单/数量 -> `getItemList`，不要打开资源。
-- 打开/查看 + 具体名称 -> `openItem`，保留用户原始名称。
-- 更新 -> `updateItem`，所有 required 参数必须来自用户输入或可靠 uiContext。
-- 缺少名称/id/value -> 澄清，不猜。
-- 介绍、解释、新闻 -> 不调用本 Skill Client Tool。
+- List / count -> `getItemList`. Do not open a resource.
+- Open / view + a specific name -> `openItem`. Keep the user's original name.
+- Update -> `updateItem`. Every required argument must come from user input or reliable uiContext.
+- Missing name / id / value -> clarify. Do not guess.
+- Introduction, explanation, news -> do not call this Skill's Client Tools.
 ```
 
 ## Knowledge Skill (always)
@@ -226,19 +226,19 @@ tool-examples: <acceptance-critical exact utterance> => <registeredToolName>
 ```md
 ---
 id: skill.knowledge
-name: 项目知识问答
-description: 回答介绍、概念、事实与公开信息；能联网搜索的不走项目知识库。不操作页面。
-when_to_use: 用户问项目是什么、公开资料、新闻，或问本系统模块含义，且没有要求操作当前页面。
+name: Project knowledge
+description: Answer introductions, concepts, facts, and public information. Do not use the project knowledge base when a web search can answer. Do not operate the page.
+when_to_use: The user asks what the project is, about public materials or news, or what a module in this system means, and does not ask to operate the current page.
 spotlight-response-strategy: direct_answer
-capability-examples: 介绍这个项目, 最近有什么公开新闻, 这个模块是什么意思
+capability-examples: Introduce this project, Any recent public news, What does this module mean
 ---
 
-# 项目知识问答
+# Project knowledge
 
-- 介绍、新闻、公开事实走联网搜索，不要调用项目知识库。
-- 只有本系统模块、内部指标、未公开资料才走知识库。
-- 不调用任何 Client Tool。
-- 业务名词本身不是操作意图。
+- Introductions, news, and public facts go through web search. Do not call the project knowledge base.
+- Use the knowledge base only for this system's modules, internal metrics, and unpublished material.
+- Do not call any Client Tool.
+- A business noun by itself is not an action intent.
 ```
 
 ## Project Pack

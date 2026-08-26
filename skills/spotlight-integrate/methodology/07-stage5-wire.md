@@ -41,7 +41,7 @@ Only when `ui adapter = VUE_READY`:
 
 If `ui adapter = ADAPTER_REQUIRED`, do not install or emulate `@inupedia/spotlight-vue`. Continue the framework-neutral Client Tool + Skill + Server path and run headless/live benchmarks. Record the missing embedded command UI as adapter work rather than declaring Core Agentization unsupported.
 
-Referential prompts require enough `uiContext`/conversation context to resolve “那个 / this / continue”. If not resolvable, the gold expectation is clarify.
+Referential prompts require enough `uiContext`/conversation context to resolve “that one / this / continue”. If not resolvable, the gold expectation is clarify.
 
 ## Project Pack
 

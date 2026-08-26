@@ -107,7 +107,7 @@ matches, and then calls the existing host capability.
 - Mutations: medium unless clearly read-only.
 - Delete/pay/transfer/submit-order/logout/reset/wipe and external commits: `GATED` by default.
 - Missing required arguments: clarify, never guess.
-- Referential commands (“that one”, “继续”, “买这个”) require resolvable UI/conversation context.
+- Referential commands (“that one”, “continue”, “buy this”) require resolvable UI/conversation context.
 
 ## Definition of agentized
 

@@ -174,14 +174,14 @@ Every generated Tool must:
 
 **Schema fidelity rule:** derive Tool schemas from the actual Store/Service/API/function boundary, not from a convenient benchmark shape. Do not casually widen `Long`/numeric ids to `string | number`, and do not narrow a real host union merely to improve model scoring. If the Tool intentionally adapts the host contract, the adapter must contain the explicit conversion and the generated report/gold set must test the Tool's real adapter contract. Never add generic Server-side coercion just to compensate for an inaccurate Tool schema.
 
-The Server recursively removes optional `null`/`undefined` values and undeclared object fields when the Tool schema forbids additional properties. In 0.9.x the client and Server also validate Tool input at the execution boundary, and the client validates declared output. This is not permission to declare loose or inaccurate schemas. A field that legitimately accepts `null` must declare it with `type: ["string", "null"]`, `anyOf`, or `oneOf`.
+The Server recursively removes optional `null`/`undefined` values and undeclared object fields when the Tool schema forbids additional properties. In 0.8.x the client and Server also validate Tool input at the execution boundary, and the client validates declared output. This is not permission to declare loose or inaccurate schemas. A field that legitimately accepts `null` must declare it with `type: ["string", "null"]`, `anyOf`, or `oneOf`.
 
 ### Resource Provider contract
 
 Use `defineResourceProvider` for large or runtime-dynamic target sets such as cameras, assets, tickets, books or BIM components. A provider owns:
 
 - one stable `namespace`;
-- runtime `search`（空 query 表示列出全部）and `get` functions;
+- runtime `search` (an empty query lists everything) and `get` functions;
 - resource `id`, display `name`, aliases and live status;
 - optional actions that resolve a required user `query` to exactly one resource before executing host behavior.
 

@@ -1,11 +1,11 @@
 ---
 name: spotlight-integrate
-description: Agentizes an existing frontend with Inupedia Spotlight by discovering real host capabilities, classifying readiness/risk, wrapping verified capabilities as Client Tools, generating Agent Skills, wiring the framework-neutral Spotlight core and an available UI adapter when supported, and leaving measurable acceptance tests. Use when the user asks to 接入 Spotlight, install Spotlight, integrate Spotlight SDK, generate Spotlight tools/skills from an existing app, or convert a finished frontend into an Agent-ready Spotlight project.
+description: Agentizes an existing frontend with Inupedia Spotlight by discovering real host capabilities, classifying readiness/risk, wrapping verified capabilities as Client Tools, generating Agent Skills, wiring the framework-neutral Spotlight core and an available UI adapter when supported, and leaving measurable acceptance tests. Use when the user asks to integrate Spotlight, install Spotlight, integrate the Spotlight SDK, generate Spotlight tools/skills from an existing app, or convert a finished frontend into an Agent-ready Spotlight project.
 ---
 
 # Spotlight Integrate
 
-Turn **this** host app into a thin Spotlight 0.9.x adapter. The consumer registers
+Turn **this** host app into a thin Spotlight 0.8.x adapter. The consumer registers
 typed Tools, Resource Providers, Skills and UI context; the deployable Spotlight Server owns
 LangChain/LangGraph routing, lifecycle, providers, memory and host dispatch.
 
@@ -38,7 +38,7 @@ Resume from `.spotlight-integrate/PIPELINE_STATE.md` if present. Template: [meth
 
 Extractors: [extractors/](extractors/). File snippets: [templates.md](templates.md). Shape-only example: [examples.md](examples.md). Human install + paste-to-LLM: [README.md](README.md) / [prompt.sh](prompt.sh).
 
-## 0.9.x runtime contract
+## 0.8.x runtime contract
 
 The browser adapter must use the current lifecycle through the SDK:
 

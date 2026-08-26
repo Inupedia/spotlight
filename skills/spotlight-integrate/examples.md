@@ -22,7 +22,7 @@ Visible UI: an “open” button, a search box, a list whose `name` fields are r
 ```ts
 export const itemResources = defineResourceProvider({
   namespace: "item",
-  description: "宿主资源",
+  description: "Host resources",
   search: async ({ query, limit }) => ({
     items: (await listItems())
       .filter((item) => item.name.includes(query))
@@ -32,13 +32,13 @@ export const itemResources = defineResourceProvider({
   actions: {
     open: {
       toolName: "openItem",
-      description: "按名称或稳定 ID 打开对应资源。",
+      description: "Open the matching resource by name or stable id.",
       handler: (item) => openItemByName(item.name),
     },
   },
 });
 
-/** 关闭当前资源视图。 */
+/** Close the current resource view. */
 export const closeItem = defineClientTool(async () => closeCurrentItem());
 ```
 
@@ -46,8 +46,8 @@ export const closeItem = defineClientTool(async () => closeCurrentItem());
 
 ```yaml
 id: skill.items
-name: 资源
-when_to_use: 用户询问有哪些资源，或要求打开、关闭某个已存在的名称
+name: Resources
+when_to_use: The user asks what resources exist, or asks to open or close an existing name
 allowed-tools: item_search, item_get, openItem, closeItem
 spotlight-response-strategy: tool_answer
 ```
@@ -56,11 +56,11 @@ Body must include the list-vs-open contract in [testing.md](testing.md). Example
 
 ## Gold rows (shape)
 
-| prompt                               | expectTool              |
-| ------------------------------------ | ----------------------- |
-| 目前有哪些…                          | item_search             |
-| 查看\<exact name from host catalog\> | openItem                |
-| 关闭…                                | closeItem               |
-| 介绍这个系统                         | (none, skill.knowledge) |
+| prompt                                       | expectTool              |
+| -------------------------------------------- | ----------------------- |
+| What … are available                         | item_search             |
+| View \<exact name from host catalog\>        | openItem                |
+| Close …                                      | closeItem               |
+| Introduce this system                        | (none, skill.knowledge) |
 
 If the host has no list/search API, do not invent a Resource Provider. If it has no open API, do not invent `openItem`.

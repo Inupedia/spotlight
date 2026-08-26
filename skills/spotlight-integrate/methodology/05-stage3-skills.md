@@ -66,7 +66,7 @@ Do not depend on a Server patch that recognizes this product by name.
 
 When one Skill exposes both a no-argument catalog/list opener and a targetable open/play Tool, make that distinction explicit in their descriptions. A named-target request that the model assigns to the catalog opener is corrected to the single targetable Tool, with the target copied into its preferred string input. This rule is generic and does not replace Resource search or ambiguity handling.
 
-In 0.9.x, large or dynamic named-target catalogs use consumer-side Resource
+In 0.8.x, large or dynamic named-target catalogs use consumer-side Resource
 Providers, not Server Project Pack catalogs. The Resource Provider owns search,
 aliases, status and stable-id resolution. Skills should name the generated
 `<namespace>_search`, `<namespace>_get` and action Tools as dependencies, explain

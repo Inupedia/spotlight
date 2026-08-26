@@ -47,11 +47,11 @@ Write `.spotlight-integrate/gold-questions.md`:
 
 | id            | prompt                              | expectRoute | expectSkill     | expectTool     | expectArgs                                       | notTools       | expectGuard     |
 | ------------- | ----------------------------------- | ----------- | --------------- | -------------- | ------------------------------------------------ | -------------- | --------------- |
-| products-list | 有哪些商品                          | action      | skill.products  | getProductList | {}                                               | openProduct    | none            |
-| products-open | 打开 <REAL_OR_RUNTIME_CATALOG_NAME> | action      | skill.products  | openProduct    | {"productName":"<REAL_OR_RUNTIME_CATALOG_NAME>"} | getProductList | none            |
-| knowledge     | 介绍一下这个系统                    | knowledge   | skill.knowledge |                |                                                  | *              | none            |
-| ambiguous     | 打开那个                            | clarify     | skill.products  |                |                                                  | *              | clarify         |
-| gated         | 提交订单                            | clarify     | skill.checkout  |                |                                                  | submitOrder    | confirm-or-deny |
+| products-list | What products are available                    | action      | skill.products  | getProductList | {}                                               | openProduct    | none            |
+| products-open | Open <REAL_OR_RUNTIME_CATALOG_NAME>            | action      | skill.products  | openProduct    | {"productName":"<REAL_OR_RUNTIME_CATALOG_NAME>"} | getProductList | none            |
+| knowledge     | Introduce this system                          | knowledge   | skill.knowledge |                |                                                  | *              | none            |
+| ambiguous     | Open that one                                  | clarify     | skill.products  |                |                                                  | *              | clarify         |
+| gated         | Submit the order                               | clarify     | skill.checkout  |                |                                                  | submitOrder    | confirm-or-deny |
 ```
 
 The example is **shape only**. Replace domain/tool/catalog names with values grounded in the host.
@@ -148,7 +148,7 @@ Then run every gold prompt through the same runtime/model configuration intended
 
 For mutations/navigation, validate the **host state/UI delta**, not only the model's chosen tool name.
 
-Also verify the actual 0.9.x lifecycle: initialize succeeds, the thread is reusable,
+Also verify the actual 0.8.x lifecycle: initialize succeeds, the thread is reusable,
 SSE sequence numbers are monotonic/resumable, host Tool correlation ids are
 acknowledged once, Tool trace is visible, and the post-action UI context reflects
 the expected state.
