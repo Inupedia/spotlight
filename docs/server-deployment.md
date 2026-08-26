@@ -4,7 +4,7 @@
 
 通用 Agent 只维护在 `inupedia-spotlight`：
 
-- `@inupedia/spotlight-server` 提供 LangGraph 路由、Knowledge Agent、Action Agent、Memory、SSE 与浏览器 Tool RPC。
+- `@inupedia/spotlight-server` 提供 LangGraph 路由、Knowledge Agent、Action Agent、显式长期记忆、SSE 与浏览器 Tool RPC。
 - 业务项目只保留 `spotlight.project.yml`、提示词、UI 元数据，以及真正项目专属的可选 Server Tool。
 - GIS、视频播放器、Cesium、页面 Store 等动作留在前端，使用 `defineClientTool` 注册。
 
@@ -27,7 +27,7 @@ services:
 
 生产环境使用 Postgres：LangGraph Checkpointer 保存图执行状态，LangGraph Store 保存受控长期记忆。`SPOTLIGHT_STATE_DIR` 另行保存产品级 Capability Session、Thread、Turn、事件重放与 fork；这两类状态不能混用。未配置 `SPOTLIGHT_DATABASE_URL` 时使用进程内 Memory，仅适合测试。
 
-短期 Memory 按 `projectId + sessionId` 隔离。长期 Memory 还要求浏览器提供稳定、已认证的 `memorySubjectId`；没有该值时 Server 会拒绝“记住”请求，绝不会退化成项目级共享记忆。Router 始终只读取本轮问题，历史消息与长期记忆只进入 Knowledge Agent。
+短期 Memory 按 `projectId + sessionId` 隔离。长期 Memory 还要求浏览器提供稳定、已认证的 `memorySubjectId`；没有该值时 Server 会拒绝“记住”请求，绝不会退化成项目级共享记忆。Router 始终只读取本轮问题；长期记忆在路由之后读取，只作为有界上下文进入后续 Agent，不会替代知识检索、当前证据、Tool 选择、权限检查或必填参数。Server 不会自动保存或语义回放完整回答。
 
 ## Project 配置
 

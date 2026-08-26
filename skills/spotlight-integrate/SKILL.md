@@ -71,6 +71,7 @@ implements it. Never fall back to a removed legacy query loop.
 16. **Memory identity is stable.** Use an authenticated immutable subject id. Never use a bearer token, token prefix, email display string, or anonymous session id as cross-session identity.
 17. **Production parity is a gate.** Dev success is insufficient: repeat representative prompts against the exact production model, Project Pack, frontend build manifest and Server image.
 18. **Tool Results are structured.** Tool handlers may return plain values, but the SDK boundary normalizes them to the shared Tool Result envelope and validates declared input/output schemas at runtime.
+19. **Memory never short-circuits the Agent.** Cross-session memory is written only by explicit remember/forget requests, recalled after routing, bounded, and used as context only. Never add semantic full-answer replay or automatic answer persistence to a host integration.
 
 ## Compatibility behavior
 

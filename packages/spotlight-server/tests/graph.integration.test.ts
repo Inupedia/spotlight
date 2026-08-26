@@ -744,6 +744,53 @@ describe("LangGraph runtime isolation", () => {
     expect(searchCalls).toBe(0);
   });
 
+  it("recalls explicit memory only after routing and still runs knowledge retrieval", async () => {
+    const store = new InMemoryStore();
+    const subjectId = "user-memory-recall";
+    await store.put(memoryNamespace("test-project", subjectId), "answer-style", {
+      schemaVersion: 1,
+      kind: "user_memory",
+      value: "简洁回答",
+      source: "user_explicit",
+    });
+    const phases: string[] = [];
+    let searches = 0;
+    const runContext = context("介绍下引大济岷", [], {
+      memorySubjectId: subjectId,
+    });
+    runContext.project = {
+      ...runContext.project,
+      knowledgeProvider: {
+        id: "knowledge",
+        async search() {
+          searches += 1;
+          return [{ title: "工程概况", content: "引大济岷工程资料" }];
+        },
+      },
+    };
+
+    await runSpotlightGraph(runContext, {
+      model: new FakeToolCallingModel(),
+      router: router({
+        route: "knowledge",
+        confidence: 1,
+        reason: "information request",
+        requestedToolNames: [],
+        explicitActionEvidence: null,
+        knowledgeSource: "knowledge",
+      }),
+      checkpointer: new MemorySaver(),
+      store,
+      onPhase: (phase) => phases.push(phase),
+    });
+
+    expect(phases.indexOf("router_done")).toBeLessThan(
+      phases.indexOf("memory_recall"),
+    );
+    expect(phases).toContain("knowledge_agent_start");
+    expect(searches).toBe(1);
+  });
+
   it("does not mutate long-term memory during an ordinary knowledge turn", async () => {
     const store = new InMemoryStore();
     const subjectId = "user-ordinary";
@@ -790,7 +837,7 @@ describe("LangGraph runtime isolation", () => {
             [
               {
                 id: "remember-1",
-                name: "remember_user_preference",
+                name: "remember_user_memory",
                 args: { key: "answer-style", value: "简洁回答" },
                 type: "tool_call",
               },
@@ -814,7 +861,7 @@ describe("LangGraph runtime isolation", () => {
             [
               {
                 id: "forget-1",
-                name: "forget_user_preference",
+                name: "forget_user_memory",
                 args: { key: "answer-style" },
                 type: "tool_call",
               },

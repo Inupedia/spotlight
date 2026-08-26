@@ -5,7 +5,7 @@
 | `spotlight-protocol` | `@inupedia/spotlight-protocol` | Client、Server 共享协议 |
 | `spotlight-client` | `@inupedia/spotlight-client` | Client Tool、HTTP 与构建清单 |
 | `spotlight-vue` | `@inupedia/spotlight-vue` | Vue Plugin、UI Shell 与远程执行管线 |
-| `spotlight-memory` | `@inupedia/spotlight-memory` | Memory Gate 与缓存存储 |
+| `spotlight-memory` | `@inupedia/spotlight-memory` | 可选的旧版答案缓存原语；Spotlight Server Agent 主链路不再使用 |
 
 ## 最小接入
 

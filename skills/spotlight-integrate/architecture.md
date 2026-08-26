@@ -84,6 +84,8 @@ framework-neutral client/runtime contract.
 - Client Tool results carry a post-action observation so the Server sees the new host state.
 - Conversation/thread memory is separate from optional cross-session memory.
 - Cross-session memory requires a stable authenticated subject id; opaque access tokens disable it rather than becoming identity.
+- Cross-session memory is explicit user-approved context. It is recalled only after routing and never replaces Knowledge, current evidence, Tool selection, authorization, or required Tool arguments.
+- Do not add answer replay, semantic QA caches, or automatic full-answer writes to the Agent lifecycle. A deterministic response cache is a separate infrastructure concern and must not be called long-term memory.
 - Entity catalogs remain consumer data. Register them as Resource Providers so they can be searched and refreshed at runtime without rebuilding the generic Server or expanding the LLM prompt with every entity.
 
 ## Tool, Resource and Skill boundary

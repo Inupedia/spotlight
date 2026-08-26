@@ -2,6 +2,29 @@ import { SpotlightLifecycleProjector } from "../src/lifecycleAdapter.js";
 import type { SpotlightServerRunEvent } from "../src/runManager.js";
 
 describe("SpotlightLifecycleProjector", () => {
+  it("projects recalled long-term memory as context rather than answer replay", () => {
+    const projector = new SpotlightLifecycleProjector("thread-1", "turn-1", 1);
+    const events = projector.project({
+      type: "turn_transition",
+      at: 2,
+      seq: 1,
+      turnId: "turn-1",
+      phase: "memory_recall",
+      summary: "使用长期记忆：answer-style；只作为上下文。",
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          type: "reasoning",
+          category: "memory",
+          summary: expect.stringContaining("只作为上下文"),
+        }),
+      }),
+    ]);
+  });
+
   it("turns routing, Skill selection and Tool execution into stable Items", () => {
     const projector = new SpotlightLifecycleProjector("thread-1", "turn-1", 1);
     const legacy: SpotlightServerRunEvent[] = [

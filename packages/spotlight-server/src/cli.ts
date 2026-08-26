@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { dirname } from "node:path";
 import { createAgentModel, createRouterModel } from "./model.js";
 import { createMemoryRuntime } from "./memory.js";
 import { loadProjectPack } from "./project.js";
@@ -7,7 +6,6 @@ import { LangChainIntentRouter } from "./router.js";
 import { RunManager } from "./runManager.js";
 import { buildServer } from "./server.js";
 import { SpotlightDurableState } from "./durableState.js";
-import { createPackMemoryStores } from "@inupedia/spotlight-memory/node";
 
 function required(env: NodeJS.ProcessEnv, name: string, fallbackName?: string): string {
   const value = env[name]?.trim() || (fallbackName ? env[fallbackName]?.trim() : "");
@@ -51,24 +49,12 @@ export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
 export async function main(): Promise<void> {
   const projectConfigPath = required(process.env, "SPOTLIGHT_PROJECT_CONFIG");
   const project = await loadProjectPack(projectConfigPath);
-  const packsRoot =
-    process.env.SPOTLIGHT_MEMORY_PACKS_ROOT?.trim() ||
-    dirname(projectConfigPath);
   const { modelConfig, routerConfig } = resolveModelConfigs();
   const memory = createMemoryRuntime(process.env.SPOTLIGHT_DATABASE_URL);
   await memory.setup();
   const durableState = new SpotlightDurableState(
     process.env.SPOTLIGHT_STATE_DIR?.trim() || ".spotlight/state",
   );
-  const packMemory = createPackMemoryStores({
-    packsRoot,
-    projectId: project.projectId,
-    tenantId: process.env.SPOTLIGHT_MEMORY_TENANT_ID,
-    gateConfig: {
-      enabled: process.env.SPOTLIGHT_MEMORY_GATE_ENABLED !== "false",
-      semanticEnabled: process.env.SPOTLIGHT_MEMORY_SEMANTIC_ENABLED !== "false",
-    },
-  });
   const manager = new RunManager({
     project,
     model: createAgentModel(modelConfig),
@@ -77,7 +63,6 @@ export async function main(): Promise<void> {
     }),
     checkpointer: memory.checkpointer,
     store: memory.store,
-    memoryGate: packMemory.gate,
     durableState,
     hostActionTimeoutMs: Number(process.env.SPOTLIGHT_HOST_ACTION_TIMEOUT_MS ?? 30_000),
   });

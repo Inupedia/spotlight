@@ -296,14 +296,17 @@ export function createLongTermMemoryTools(
         async ({ key, value }) => {
           const call: SpotlightToolCallInfo = {
             id: crypto.randomUUID(),
-            name: "remember_user_preference",
+            name: "remember_user_memory",
             input: { key, value },
-            displayName: "记住用户偏好",
+            displayName: "保存长期记忆",
           };
           progress?.onStart?.(call);
           try {
             await store.put(namespace, key, {
+              schemaVersion: 1,
+              kind: "user_memory",
               value,
+              source: "user_explicit",
               updatedAt: new Date().toISOString(),
             });
             const output = `Remembered ${key}.`;
@@ -318,9 +321,9 @@ export function createLongTermMemoryTools(
           }
         },
         {
-          name: "remember_user_preference",
+          name: "remember_user_memory",
           description:
-            "Persist a user preference or fact only when the user explicitly asks to remember it.",
+            "Persist one user preference or stable fact only when the user explicitly asks to remember it.",
           schema: rememberSchema,
         },
       ),
@@ -332,9 +335,9 @@ export function createLongTermMemoryTools(
         async ({ key }) => {
           const call: SpotlightToolCallInfo = {
             id: crypto.randomUUID(),
-            name: "forget_user_preference",
+            name: "forget_user_memory",
             input: { key },
-            displayName: "忘记用户偏好",
+            displayName: "删除长期记忆",
           };
           progress?.onStart?.(call);
           try {
@@ -351,9 +354,9 @@ export function createLongTermMemoryTools(
           }
         },
         {
-          name: "forget_user_preference",
+          name: "forget_user_memory",
           description:
-            "Delete a persisted preference only when the user explicitly asks to forget it.",
+            "Delete one persisted user memory only when the user explicitly asks to forget it.",
           schema: forgetSchema,
         },
       ),

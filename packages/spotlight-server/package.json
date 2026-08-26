@@ -33,7 +33,6 @@
   },
   "dependencies": {
     "@fastify/cors": "^11.1.0",
-    "@inupedia/spotlight-memory": "workspace:*",
     "@inupedia/spotlight-protocol": "workspace:*",
     "@langchain/core": "^1.2.5",
     "@langchain/langgraph": "^1.4.9",

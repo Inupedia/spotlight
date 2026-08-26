@@ -409,13 +409,13 @@ export function applyLangGraphTransition(
         summary ?? "页面操作已完成。",
       );
       return;
-    case "memory_replay":
+    case "memory_recall":
       setTransitionStep(
         api,
         SPOTLIGHT_PIPELINE_STEP_IDS.understand,
         "理解问题",
         "done",
-        summary ?? "已复用项目记忆，跳过本轮检索。",
+        summary ?? "已结合用户明确保存的长期记忆。",
       );
       return;
     default:

@@ -19,11 +19,6 @@ const ACTION_PATTERNS = [
   /(?:open|close|play|pause|navigate|enter|exit|return|start|stop|resume|enable|switch|show|hide|view)/iu,
 ];
 
-const MEMORY_CONTROL_PATTERNS = [
-  /(?:记住|记得|忘记|别再记|删除.*记忆)/u,
-  /(?:remember|forget|delete.*memory)/iu,
-];
-
 const UNRESOLVED_TOOL_INPUT_PLACEHOLDERS = new Set([
   "?",
   "？",
@@ -68,7 +63,7 @@ export function extractActionEvidence(question: string): string | null {
 }
 
 export function hasMemoryControlEvidence(question: string): boolean {
-  return MEMORY_CONTROL_PATTERNS.some((pattern) => pattern.test(question));
+  return memoryControlMode(question) !== null;
 }
 
 export function isMemoryReadEnabled(request: CreateRunRequest): boolean {
@@ -87,9 +82,21 @@ export function isMemoryReadEnabled(request: CreateRunRequest): boolean {
 export function memoryControlMode(
   question: string,
 ): "remember" | "forget" | null {
-  if (/(?:忘记|别再记|删除.*记忆|forget|delete.*memory)/iu.test(question))
+  if (
+    /(?:请|帮我|给我)?(?:忘记|别再记|删除).*(?:记忆|偏好|我说过的|这件事)|^\s*(?:please\s+)?(?:forget|delete)\b.*(?:memory|preference|that)/iu.test(
+      question,
+    )
+  )
     return "forget";
-  if (/(?:记住|记得|remember)/iu.test(question)) return "remember";
+  if (
+    /(?:请|帮我|给我)?记住/u.test(question) ||
+    /(?:^|以后|之后|下次)\s*记得(?:要|用|把|给|保持|回答|称呼|提醒)/u.test(
+      question,
+    ) ||
+    /^\s*(?:please\s+)?remember\b/iu.test(question)
+  ) {
+    return "remember";
+  }
   return null;
 }
 

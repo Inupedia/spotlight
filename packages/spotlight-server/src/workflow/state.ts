@@ -22,6 +22,10 @@ export const RuntimeState = Annotation.Root({
   decision: Annotation<IntentDecision>(),
   lane: Annotation<WorkflowLane>(),
   skipGather: Annotation<boolean>(),
+  memoryContext: Annotation<string>({
+    reducer: (_left, right) => right,
+    default: () => "",
+  }),
   assistantReply: Annotation<string>(),
   invokedClientTools: Annotation<string[]>({
     reducer: (left, right) => {
@@ -106,6 +110,7 @@ export function initialRuntimeState(
     invokedClientTools: [INVOKED_TOOLS_TURN_RESET],
     assistantReply: "",
     skipGather: false,
+    memoryContext: "",
     evidenceBundle: resetEvidenceBundle(),
   };
 }

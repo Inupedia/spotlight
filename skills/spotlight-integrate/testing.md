@@ -35,6 +35,7 @@ Fail static acceptance if:
 - a generated Tool does not call a verified host capability;
 - a `GATED` capability was auto-exposed without explicit approval;
 - compatibility blockers were hidden with forced package installation.
+- host code adds automatic full-answer Memory writes or a Memory hit that bypasses Server routing, Knowledge, authorization, or Tool execution.
 
 Static success means **the adapter is internally consistent**. It does not prove LLM routing accuracy.
 
@@ -152,6 +153,12 @@ Also verify the actual 0.8.x lifecycle: initialize succeeds, the thread is reusa
 SSE sequence numbers are monotonic/resumable, host Tool correlation ids are
 acknowledged once, Tool trace is visible, and the post-action UI context reflects
 the expected state.
+
+When long-term memory is enabled, additionally verify that an authenticated stable
+`memorySubjectId` can explicitly remember and forget one preference, an ordinary
+turn does not write memory, a recall question such as “你记得我上次说过什么吗”
+does not mutate memory, and recalled memory is shown as context while the current
+route/Knowledge/Tool path still executes.
 
 For every Resource Provider, test exact id, exact name, alias, fuzzy search,
 ambiguous query, missing query, live status refresh and action execution by stable

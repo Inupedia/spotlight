@@ -3,7 +3,6 @@ import type {
   SpotlightErrorItem,
   SpotlightItem,
   SpotlightKnowledgeSearchItem,
-  SpotlightMemoryItem,
   SpotlightReasoningItem,
   SpotlightSkillUseItem,
   SpotlightToolCallItem,
@@ -120,7 +119,7 @@ export class SpotlightLifecycleProjector {
       const item = completedAt({
         id: `reasoning:${event.seq}`,
         type: "reasoning",
-        category: event.phase === "memory_replay"
+        category: event.phase === "memory_recall"
           ? "memory"
           : event.phase === "routing" || event.phase === "analyzing" || event.phase === "router_done"
             ? "routing"
@@ -145,24 +144,6 @@ export class SpotlightLifecycleProjector {
         output.push(this.emitItem(at, "item.completed", skillItem));
       }
       return output;
-    }
-    if (event.type === "memory_decision") {
-      const labels = {
-        reuse: "已复用项目记忆",
-        augment: "正在结合历史项目结论",
-        refresh: "资料可能变化，正在重新验证",
-        ignore: "未发现可直接使用的项目记忆",
-      } as const;
-      const item = completedAt({
-        id: `memory:${event.turnId}`,
-        type: "memory",
-        action: event.decision.action,
-        summary: labels[event.decision.action],
-        entryIds: event.decision.memoryIds,
-        status: "in_progress",
-        startedAt: at,
-      } satisfies SpotlightMemoryItem, at);
-      return [this.emitItem(at, "item.completed", item)];
     }
     if (event.type === "run_status") {
       if (!event.detail?.trim()) return [];
@@ -317,8 +298,6 @@ export class SpotlightLifecycleProjector {
         metadata: {
           commandName: event.commandName,
           stopReason: event.stopReason,
-          memoryReplay: event.memoryReplay,
-          memoryDecision: event.memoryDecision,
         },
       })];
     }

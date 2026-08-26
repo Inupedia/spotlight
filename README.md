@@ -199,7 +199,7 @@ A Spotlight conversation uses three stable primitives:
 
 - **Thread** — one resumable conversation.
 - **Turn** — one user request through completion, failure, or interruption.
-- **Item** — a typed unit such as Skill use, Tool call, knowledge search, reasoning summary, Memory decision, or final message.
+- **Item** — a typed unit such as Skill use, Tool call, knowledge search, reasoning summary, long-term-memory recall, or final message.
 
 The frontend never consumes LangGraph node names or routing phases. It receives
 `turn.started`, `item.started`, `item.updated`, `item.completed`,
@@ -233,6 +233,12 @@ Requires a **stable** `memorySubjectId` from the host product.
 
 If the host cannot provide a stable user identity, Spotlight should not silently fall back to a shared project-wide memory bucket. That would risk memory leakage across users.
 
+Long-term memory is written or deleted only when the user explicitly asks. It is
+recalled after routing as bounded context and never replaces routing, Knowledge,
+current evidence, Tool selection, authorization, or required Tool arguments.
+Spotlight does not automatically persist or semantically replay complete assistant
+answers.
+
 ## Packages
 
 | Package                        | Role                                                                                     |
@@ -240,7 +246,7 @@ If the host cannot provide a stable user identity, Spotlight should not silently
 | `@inupedia/spotlight-protocol` | Shared client / server protocol                                                          |
 | `@inupedia/spotlight-client`   | `defineClientTool`, App Client, Thread / Turn stream, and build-time tool manifest       |
 | `@inupedia/spotlight-vue`      | Current Vue adapter: plugin, command UI, Skill reporting, and browser execution pipeline |
-| `@inupedia/spotlight-memory`   | Memory Gate and cache-backed storage                                                     |
+| `@inupedia/spotlight-memory`   | Optional legacy answer-cache primitives; not used by the Spotlight Server Agent lifecycle |
 | `@inupedia/spotlight-server`   | Deployable LangChain / LangGraph runtime                                                 |
 
 See [`packages/README.md`](./packages/README.md) for the package-level overview.

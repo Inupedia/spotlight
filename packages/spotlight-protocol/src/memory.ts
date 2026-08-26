@@ -1,4 +1,8 @@
-/** Spotlight Memory — shared types (client ↔ server, persisted entries). */
+/**
+ * Legacy answer-cache types. The Spotlight Server Agent lifecycle no longer
+ * writes or replays these entries; cross-session user memory lives in the
+ * LangGraph Store and is recalled as bounded context after routing.
+ */
 
 export type SpotlightMemoryEntryKind =
   "qa_answer" | "action_plan" | "routing_hint" | "data_snapshot";

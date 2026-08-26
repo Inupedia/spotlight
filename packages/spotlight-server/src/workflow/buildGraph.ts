@@ -68,6 +68,7 @@ import {
   toolsForMatchedSkills,
 } from "./helpers.js";
 import { matchedSkillDeclaresChain } from "./skillChain.js";
+import { buildLongTermMemoryContext } from "./longTermMemory.js";
 import {
   assistantUpdate,
   compactText,
@@ -464,6 +465,24 @@ export function compileSpotlightWorkflow(
       );
       return { decision, lane, skipGather: false };
     })
+    .addNode("memory_recall", async (_state, config) => {
+      if (!namespace || !isMemoryReadEnabled(context.request)) {
+        return { memoryContext: "" };
+      }
+      const storedMemories = await options.store.search(namespace, { limit: 20 });
+      const recalled = buildLongTermMemoryContext(storedMemories);
+      if (recalled.ids.length > 0) {
+        emitPhase(
+          config,
+          options,
+          "memory_recall",
+          `使用长期记忆：${recalled.labels.join("、")}；这些内容只作为用户授权的上下文，不替代本轮路由、资料检索或 Tool 参数。`,
+        );
+      }
+      return {
+        memoryContext: recalled.prompt,
+      };
+    })
     .addNode("knowledge_gather", gather)
     .addNode("knowledge_synthesize", async (state, config) => {
       if (isCapabilityHelpQuestion(state.question, context.project.uiPrompts)) {
@@ -481,15 +500,6 @@ export function compileSpotlightWorkflow(
         return { ...assistantUpdate(reply), invokedClientTools: [] };
       }
       const memoryReadEnabled = isMemoryReadEnabled(context.request);
-      const storedMemories =
-        namespace && memoryReadEnabled
-          ? await options.store.search(namespace, { limit: 20 })
-          : [];
-      const memoryContext = storedMemories.length
-        ? `User-approved long-term memory:\n${storedMemories
-            .map((item) => `- ${item.key}: ${JSON.stringify(item.value)}`)
-            .join("\n")}`
-        : "";
       const evidence = state.evidenceBundle ?? emptyEvidenceBundle();
       const result = await options.model.invoke(
         buildKnowledgeSynthesizeMessages({
@@ -498,7 +508,7 @@ export function compileSpotlightWorkflow(
           sessionPrompt,
           projectPrompt: context.project.systemPrompt ?? "",
           memoryContext: memoryReadEnabled
-            ? memoryContext
+            ? state.memoryContext
             : "The user disabled memory recall for this turn. Do not use long-term memory.",
           observedPrompt: observedPrompt(),
           messages: state.messages,
@@ -684,6 +694,9 @@ export function compileSpotlightWorkflow(
           state.decision.requestedToolInput
             ? `The router extracted these schema-shaped arguments from the user message: ${JSON.stringify(state.decision.requestedToolInput)}. Use them for the selected tool unless they conflict with the Skill or tool schema.`
             : "",
+          state.memoryContext
+            ? `${state.memoryContext}\nMemory may affect response style only. It must not select a Tool or supply an action argument.`
+            : "",
           sessionPrompt,
           context.project.systemPrompt ?? "",
         ].join("\n"),
@@ -741,6 +754,13 @@ export function compileSpotlightWorkflow(
         );
         return { ...assistantUpdate(reply), invokedClientTools: [] };
       }
+      const existingMemory =
+        controlMode && namespace
+          ? buildLongTermMemoryContext(
+              await options.store.search(namespace, { limit: 50 }),
+              { maxItems: 50, maxContextChars: 8_000 },
+            )
+          : { ids: [], labels: [], prompt: "" };
       const tools =
         controlMode && namespace
           ? createLongTermMemoryTools(options.store, namespace, controlMode, {
@@ -767,9 +787,14 @@ export function compileSpotlightWorkflow(
         systemPrompt: [
           "You are the Spotlight memory controller.",
           "Only perform the explicit remember or forget operation.",
-          controlMode
-            ? `The user explicitly requested a ${controlMode} operation. You must call the provided memory tool before confirming success.`
-            : "No memory mutation is allowed.",
+          controlMode === "remember"
+            ? "The user explicitly requested a remember operation. Save one concise stable key and the exact preference or stable fact. Reuse an existing key when it represents the same concept. You must call the provided memory tool before confirming success."
+            : controlMode === "forget"
+              ? "The user explicitly requested a forget operation. Delete only an exact existing key that uniquely matches the request. If no key or multiple keys match, ask one concise clarification and do not call a tool."
+              : "No memory mutation is allowed.",
+          existingMemory.prompt
+            ? `Existing user-approved memories:\n${existingMemory.prompt}`
+            : "There are no existing long-term-memory keys for this subject.",
         ].join("\n"),
         middleware: [
           toolRetryMiddleware({ maxRetries: 2 }),
@@ -796,11 +821,14 @@ export function compileSpotlightWorkflow(
     .addConditionalEdges("route", (state) => {
       if (state.lane === "memory_mutate") return "memory_mutate";
       if (state.lane === "clarify") return "clarify";
+      if (state.skipGather) return "knowledge_synthesize";
+      return "memory_recall";
+    })
+    .addConditionalEdges("memory_recall", (state) => {
       if (state.lane === "action") return "action_plan";
       if (state.lane === "knowledge_then_action") {
-        return state.skipGather ? "decide" : "knowledge_gather";
+        return "knowledge_gather";
       }
-      if (state.skipGather) return "knowledge_synthesize";
       return "knowledge_gather";
     })
     .addConditionalEdges("knowledge_gather", (state) =>

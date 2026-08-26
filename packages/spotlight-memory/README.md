@@ -1,8 +1,16 @@
 # @inupedia/spotlight-memory
 
-Spotlight **Memory Gate** — exact + semantic cache for repeated user questions.
+Optional exact + semantic answer-cache primitives for repeated deterministic
+requests.
 
-Part of the Inupedia Spotlight SDK. See `docs/SPOTLIGHT_MEMORY_ARCHITECTURE.md` in the host repo.
+This package is no longer wired into the Spotlight Server Agent lifecycle. The
+Server uses LangGraph Checkpointer for Thread state and LangGraph Store for
+explicit, user-approved long-term memory. It never semantically replays complete
+assistant answers.
+
+Use this package only when an application explicitly needs an independently
+versioned response cache. A cache hit must not bypass Agent routing, Knowledge,
+authorization, or Tool execution.
 
 ## Role
 
@@ -18,7 +26,7 @@ Part of the Inupedia Spotlight SDK. See `docs/SPOTLIGHT_MEMORY_ARCHITECTURE.md` 
 pnpm add @inupedia/spotlight-memory @inupedia/spotlight-protocol
 ```
 
-## Usage (spotlight-server)
+## Legacy cache usage
 
 ```typescript
 import { createPackMemoryStores } from "@inupedia/spotlight-memory/node";
@@ -29,7 +37,7 @@ const { gate } = createPackMemoryStores({
   gateConfig: { semanticThreshold: 0.92 },
 });
 
-// Gate 0 — before deterministic gate
+// Application-owned cache lookup. Do not place this before Agent routing.
 const result = await gate.lookup({
   projectId,
   question: request.userQuestion,
@@ -39,11 +47,7 @@ const result = await gate.lookup({
   },
 });
 
-if (result.hit) {
-  return replayMemoryHit(result.result, sink);
-}
-
-// After slow path succeeds:
+// Cache only a deterministic, versioned artifact after independent validation.
 await gate.write({
   projectId,
   question: request.userQuestion,

@@ -5,8 +5,6 @@ import type {
   CreateRunRequest,
   HostToolResultRequest,
   SpotlightActiveRun,
-  SpotlightMemoryDecision,
-  SpotlightMemoryReplayMeta,
   SpotlightRunStatus,
   SpotlightRunSummary,
   ToolTraceEvent,
@@ -15,7 +13,6 @@ import {
   deriveToolTier,
   isToolTierReplaySafe,
 } from "@inupedia/spotlight-protocol";
-import type { MemoryGate } from "@inupedia/spotlight-memory/node";
 import type {
   HostActionBridge,
   HostActionCall,
@@ -30,13 +27,6 @@ import {
   workflowRunnableConfig,
 } from "./graph.js";
 import type { SpotlightGraphToolEvent } from "./graph.js";
-import {
-  buildMemoryDecision,
-  lookupProjectMemory,
-  replayMetaFromHit,
-  writeProjectMemory,
-} from "./memory/runMemory.js";
-import { memoryControlMode } from "./safety.js";
 import {
   buildSessionContext,
   initialMessagesForRun,
@@ -62,12 +52,6 @@ export type SpotlightServerRunEventBody =
       matchedSkillNames?: string[];
     }
   | { type: "assistant_response"; at: number; iteration: number; content: string }
-  | {
-      type: "memory_decision";
-      at: number;
-      turnId: string;
-      decision: SpotlightMemoryDecision;
-    }
   | {
       type: "run_status";
       at: number;
@@ -125,8 +109,6 @@ export type SpotlightServerRunEventBody =
       failureClass: null;
       elapsedMs: number;
       summary: SpotlightRunSummary;
-      memoryReplay?: SpotlightMemoryReplayMeta;
-      memoryDecision?: SpotlightMemoryDecision;
     }
   | { type: "run_error"; at: number; runId: string; error: string };
 
@@ -183,7 +165,6 @@ export interface RunManagerOptions {
   router: IntentRouter;
   checkpointer: BaseCheckpointSaver;
   store: BaseStore;
-  memoryGate?: MemoryGate;
   /** Budget for a host call while a browser is attached. */
   hostActionTimeoutMs?: number;
   /** Total wall-clock budget for a host call, including time spent disconnected. */
@@ -622,70 +603,6 @@ export class RunManager {
         streamMode: ["custom"] as ["custom"],
       };
 
-      let memoryLookup:
-        | Awaited<ReturnType<typeof lookupProjectMemory>>
-        | null = null;
-      let memoryDecision: SpotlightMemoryDecision | null = null;
-      let memoryReplay: SpotlightMemoryReplayMeta | null = null;
-
-      if (
-        this.options.memoryGate &&
-        !memoryControlMode(run.request.userQuestion)
-      ) {
-        memoryLookup = await lookupProjectMemory(
-          this.options.memoryGate,
-          run.request,
-          this.options.project.projectId,
-        );
-        memoryDecision = buildMemoryDecision(
-          memoryLookup,
-          run.request.memoryRefreshRequested === true,
-        );
-        this.emit(run, {
-          type: "memory_decision",
-          at: Date.now(),
-          turnId,
-          decision: memoryDecision,
-        });
-
-        if (
-          memoryDecision.action === "reuse" &&
-          memoryLookup.hit &&
-          memoryLookup.result.entry.answer?.trim()
-        ) {
-          memoryReplay = replayMetaFromHit(memoryLookup);
-          const assistantReply = memoryLookup.result.entry.answer!.trim();
-          this.emit(run, {
-            type: "turn_transition",
-            at: Date.now(),
-            turnId,
-            phase: "memory_replay",
-            summary: "已复用项目记忆，跳过本轮 LLM 规划。",
-          });
-          this.emit(run, {
-            type: "assistant_response",
-            at: Date.now(),
-            iteration: run.step,
-            content: assistantReply,
-          });
-          this.finish(run, {
-            type: "run_completed",
-            at: Date.now(),
-            runId: run.id,
-            turnId,
-            assistantReply,
-            commandName: null,
-            stopReason: "knowledge",
-            failureClass: null,
-            elapsedMs: Date.now() - startedAt,
-            summary: this.runSummary(run),
-            memoryReplay,
-            memoryDecision,
-          });
-          return;
-        }
-      }
-
       const sessionContext = buildSessionContext(run.request);
       const priorState = await graph.getState(runConfig);
       const checkpointMessageCount = priorState?.values?.messages?.length ?? 0;
@@ -716,22 +633,6 @@ export class RunManager {
         invokedClientTools: values.invokedClientTools ?? [],
       };
 
-      if (
-        this.options.memoryGate &&
-        memoryDecision?.action !== "refresh" &&
-        result.assistantReply?.trim()
-      ) {
-        await writeProjectMemory(this.options.memoryGate, {
-          request: run.request,
-          projectId: this.options.project.projectId,
-          runId: run.id,
-          route: result.route,
-          assistantReply: result.assistantReply,
-          confidence: result.decision?.confidence ?? 0.85,
-          invokedTools: result.invokedClientTools,
-        });
-      }
-
       this.emit(run, {
         type: "assistant_response",
         at: Date.now(),
@@ -750,8 +651,6 @@ export class RunManager {
         failureClass: null,
         elapsedMs: Date.now() - startedAt,
         summary: this.runSummary(run),
-        memoryReplay: memoryReplay ?? undefined,
-        memoryDecision: memoryDecision ?? undefined,
       });
     } catch (error) {
       this.finish(run, {

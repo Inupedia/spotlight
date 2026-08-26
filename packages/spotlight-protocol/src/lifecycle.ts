@@ -209,6 +209,7 @@ export interface SpotlightKnowledgeSearchItem extends SpotlightItemBase {
 
 export interface SpotlightMemoryItem extends SpotlightItemBase {
   type: "memory";
+  /** @deprecated Legacy answer-cache decision item. */
   action: "reuse" | "augment" | "refresh" | "ignore";
   summary: string;
   entryIds: string[];

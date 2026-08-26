@@ -6,7 +6,6 @@ import {
   initialMessagesForRun,
   sessionContextPromptBlock,
 } from "../src/workflow/sessionContext.js";
-import { buildMemoryDecision } from "../src/memory/runMemory.js";
 
 describe("sessionContext", () => {
   it("builds conversation context from browser session state", () => {
@@ -62,33 +61,5 @@ describe("sessionContext", () => {
 
     const warmThread = initialMessagesForRun("第二条", session, 4);
     expect(warmThread).toEqual([new HumanMessage("第二条")]);
-  });
-});
-
-describe("runMemory decisions", () => {
-  it("reuses qa_answer hits unless refresh is requested", () => {
-    const lookup = {
-      hit: true as const,
-      result: {
-        source: "exact" as const,
-        matchKind: "exact" as const,
-        entry: {
-          id: "mem-1",
-          projectId: "demo",
-          questionNorm: "test",
-          kind: "qa_answer" as const,
-          answer: "cached answer",
-          invalidation: {},
-          ttlSec: 3600,
-          createdAt: Date.now(),
-          hitCount: 1,
-          confidence: 1,
-        },
-        confidence: 1,
-        lookupLatencyMs: 1,
-      },
-    };
-    expect(buildMemoryDecision(lookup, false).action).toBe("reuse");
-    expect(buildMemoryDecision(lookup, true).action).toBe("refresh");
   });
 });

@@ -106,9 +106,6 @@ importers:
       '@fastify/cors':
         specifier: ^11.1.0
         version: 11.3.0
-      '@inupedia/spotlight-memory':
-        specifier: workspace:*
-        version: link:../spotlight-memory
       '@inupedia/spotlight-protocol':
         specifier: workspace:*
         version: link:../spotlight-protocol
