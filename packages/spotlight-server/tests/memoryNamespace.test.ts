@@ -10,18 +10,21 @@ describe("memoryNamespace", () => {
     ]);
   });
 
-  it("escapes periods in project and subject labels", () => {
-    const namespace = memoryNamespace("project.v2", "user.name@example.com");
+  it("escapes all LangGraph PostgreSQL namespace metacharacters", () => {
+    const namespace = memoryNamespace(
+      "project.v2%internal",
+      "user_name@example.com\\tenant",
+    );
 
     expect(namespace).toHaveLength(3);
-    expect(namespace[0]).toMatch(/^x_[A-Za-z0-9_-]+$/u);
+    expect(namespace[0]).toMatch(/^x-[a-f0-9]+$/u);
     expect(namespace[1]).toBe("subjects");
-    expect(namespace[2]).toMatch(/^x_[A-Za-z0-9_-]+$/u);
-    expect(namespace.every((label) => !label.includes("."))).toBe(true);
+    expect(namespace[2]).toMatch(/^x-[a-f0-9]+$/u);
+    expect(namespace.every((label) => !/[.%_\\]/u.test(label))).toBe(true);
   });
 
   it("keeps escaped-looking raw labels distinct from encoded dotted labels", () => {
-    const encodedLooking = memoryNamespace("project", "x_dXNlci5uYW1l");
+    const encodedLooking = memoryNamespace("project", "x-757365722e6e616d65");
     const dotted = memoryNamespace("project", "user.name");
 
     expect(encodedLooking[2]).not.toBe(dotted[2]);

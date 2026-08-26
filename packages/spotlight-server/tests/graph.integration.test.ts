@@ -791,6 +791,58 @@ describe("LangGraph runtime isolation", () => {
     expect(searches).toBe(1);
   });
 
+  it("answers personal-memory inspection without external retrieval", async () => {
+    const store = new InMemoryStore();
+    const subjectId = "user-memory-inspection";
+    await store.put(memoryNamespace("test-project", subjectId), "answer-style", {
+      schemaVersion: 1,
+      kind: "user_memory",
+      value: "简洁回答",
+      source: "user_explicit",
+    });
+    let searches = 0;
+    let routerCalls = 0;
+    const phases: string[] = [];
+    const runContext = context("你还记得我的回答风格偏好吗？", [], {
+      memorySubjectId: subjectId,
+    });
+    runContext.project = {
+      ...runContext.project,
+      knowledgeProvider: {
+        id: "knowledge",
+        async search() {
+          searches += 1;
+          return [];
+        },
+      },
+      webSearchProvider: {
+        id: "web",
+        async search() {
+          searches += 1;
+          return [];
+        },
+      },
+    };
+
+    await runSpotlightGraph(runContext, {
+      model: new FakeToolCallingModel(),
+      router: {
+        async route() {
+          routerCalls += 1;
+          throw new Error("personal-memory inspection must bypass the router");
+        },
+      },
+      checkpointer: new MemorySaver(),
+      store,
+      onPhase: (phase) => phases.push(phase),
+    });
+
+    expect(routerCalls).toBe(0);
+    expect(searches).toBe(0);
+    expect(phases).toContain("memory_recall");
+    expect(phases).not.toContain("knowledge_agent_start");
+  });
+
   it("does not mutate long-term memory during an ordinary knowledge turn", async () => {
     const store = new InMemoryStore();
     const subjectId = "user-ordinary";

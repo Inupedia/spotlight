@@ -19,6 +19,7 @@ import type {
 } from "../contracts.js";
 import {
   actionToolAllowlist,
+  isPersonalMemoryInspection,
   isMemoryReadEnabled,
   memoryControlMode,
 } from "../safety.js";
@@ -397,6 +398,28 @@ export function compileSpotlightWorkflow(
         );
         return { decision, lane: "memory_mutate" as WorkflowLane };
       }
+      if (isPersonalMemoryInspection(state.question)) {
+        const decision: IntentDecision = {
+          route: "knowledge",
+          confidence: 1,
+          reason: "Deterministic personal-memory inspection fence.",
+          requestedToolNames: [],
+          explicitActionEvidence: null,
+          matchedSkillNames: [],
+        };
+        emitPhase(
+          config,
+          options,
+          "router_done",
+          `识别为个人记忆查询：“${compactText(state.question)}”；只读取用户授权的长期记忆，不调用知识库、联网搜索或页面 Tool。`,
+        );
+        return {
+          decision,
+          lane: "knowledge" as WorkflowLane,
+          skipGather: true,
+          skipMemoryRecall: false,
+        };
+      }
       const decision = await options.router.route(
         state.question,
         clientTools,
@@ -450,6 +473,7 @@ export function compileSpotlightWorkflow(
           decision: { ...decision, route: "knowledge" as const },
           lane: "knowledge" as WorkflowLane,
           skipGather: true,
+          skipMemoryRecall: true,
         };
       }
       emitPhase(
@@ -821,10 +845,13 @@ export function compileSpotlightWorkflow(
     .addConditionalEdges("route", (state) => {
       if (state.lane === "memory_mutate") return "memory_mutate";
       if (state.lane === "clarify") return "clarify";
-      if (state.skipGather) return "knowledge_synthesize";
+      if (state.skipGather && state.skipMemoryRecall) {
+        return "knowledge_synthesize";
+      }
       return "memory_recall";
     })
     .addConditionalEdges("memory_recall", (state) => {
+      if (state.skipGather) return "knowledge_synthesize";
       if (state.lane === "action") return "action_plan";
       if (state.lane === "knowledge_then_action") {
         return "knowledge_gather";

@@ -66,6 +66,18 @@ export function hasMemoryControlEvidence(question: string): boolean {
   return memoryControlMode(question) !== null;
 }
 
+/** A read-only question about facts or preferences stored for this user. */
+export function isPersonalMemoryInspection(question: string): boolean {
+  return [
+    /(?:你|系统)?(?:还)?记得(?:我|我的|关于我|我之前|我上次)/u,
+    /(?:我|我的).*(?:偏好|习惯|称呼).*(?:是什么|吗|哪些)/u,
+    /(?:我之前|我上次)(?:说|告诉).*(?:什么|哪些)/u,
+    /\bdo you (?:still )?remember (?:me|my|what i|our last)\b/iu,
+    /\bwhat do you remember about me\b/iu,
+    /\bwhat (?:is|are) my\b.*\bpreferences?\b/iu,
+  ].some((pattern) => pattern.test(question));
+}
+
 export function isMemoryReadEnabled(request: CreateRunRequest): boolean {
   if (request.memoryRefreshRequested === true) return false;
   const session = request.sessionState as

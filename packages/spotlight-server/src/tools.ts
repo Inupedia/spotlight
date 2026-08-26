@@ -287,7 +287,7 @@ export function memoryNamespace(
   ];
 }
 
-const ESCAPED_NAMESPACE_PREFIX = "x_";
+const ESCAPED_NAMESPACE_PREFIX = "x-";
 
 /**
  * LangGraph Store rejects namespace labels containing periods. Preserve the
@@ -297,12 +297,12 @@ const ESCAPED_NAMESPACE_PREFIX = "x_";
  */
 function langGraphNamespaceLabel(label: string): string {
   if (
-    !label.includes(".") &&
+    !/[.%_\\]/u.test(label) &&
     !label.startsWith(ESCAPED_NAMESPACE_PREFIX)
   ) {
     return label;
   }
-  return `${ESCAPED_NAMESPACE_PREFIX}${Buffer.from(label, "utf8").toString("base64url")}`;
+  return `${ESCAPED_NAMESPACE_PREFIX}${Buffer.from(label, "utf8").toString("hex")}`;
 }
 
 export function createLongTermMemoryTools(
