@@ -1,4 +1,4 @@
-# Spotlight Server 0.7.1 部署与 Project Pack
+# Spotlight Server 0.8.0 部署与 Project Pack
 
 ## 结论
 
@@ -13,7 +13,7 @@
 ```yaml
 services:
   spotlight-server:
-    image: ghcr.io/inupedia/spotlight-server:0.7.1
+    image: ghcr.io/inupedia/spotlight-server:0.8.0
     ports: ["8787:8787"]
     env_file: .env
     environment:
@@ -60,7 +60,10 @@ Project module 可以注册新的知识库或联网搜索 Provider，不需要�
 
 ```js
 export function registerProviders(registry) {
-  registry.registerKnowledge("ragflow", (config) => new RagflowProvider(config));
+  registry.registerKnowledge(
+    "ragflow",
+    (config) => new RagflowProvider(config),
+  );
 }
 ```
 
@@ -77,24 +80,26 @@ module: ./server-tools.mjs
 模块导出 `serverTools`：
 
 ```js
-export const serverTools = [{
-  name: "query_project_weather",
-  description: "查询项目现场天气",
-  schema: {
-    type: "object",
-    properties: { date: { type: "string" } },
-    required: ["date"],
-    additionalProperties: false,
+export const serverTools = [
+  {
+    name: "query_project_weather",
+    description: "查询项目现场天气",
+    schema: {
+      type: "object",
+      properties: { date: { type: "string" } },
+      required: ["date"],
+      additionalProperties: false,
+    },
+    metadata: {
+      domain: "project",
+      effect: "read",
+      risk: "low",
+    },
+    async invoke({ date }) {
+      return projectWeatherApi.query(date);
+    },
   },
-  metadata: {
-    domain: "project",
-    effect: "read",
-    risk: "low",
-  },
-  async invoke({ date }) {
-    return projectWeatherApi.query(date);
-  },
-}];
+];
 ```
 
 `domain / effect / risk` 缺失会导致 Server 启动失败。信息路径只加载 `effect: read` 的 Server Tool；Client Tool 只进入 Action Agent。

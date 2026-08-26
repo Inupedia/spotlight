@@ -1,6 +1,6 @@
 # Spotlight Integrate
 
-把现有前端升级成 **Agent-ready Spotlight 应用**：编码 Agent 读取本 Skill Pack，分析宿主真实业务能力，把它们包装成 Client Tools + Agent Skills，再接入 0.7.x 的 initialize/thread/turn/SSE/host-result 生命周期与可量化验收。Vue 3 有现成视觉适配器；其他 JS/TS 宿主仍可完成 Core Agentization。
+把现有前端升级成 **Agent-ready Spotlight 应用**：编码 Agent 读取本 Skill Pack，分析宿主真实业务能力，把它们包装成 Client Tools + Resource Providers + Agent Skills，再接入 0.9.x 的 initialize/thread/turn/SSE/host-result 生命周期与可量化验收。Vue 3 有现成视觉适配器；其他 JS/TS 宿主仍可完成 Core Agentization。
 
 核心原则：**宿主业务代码是唯一事实源，Spotlight 是 Agent 化适配层，不是第二套业务系统，也不是 DOM 点击机器人。**
 
@@ -14,7 +14,7 @@ Store / Service / Router / 页面引擎
         ↓
 spotlight-integrate（开发阶段 Coding Agent）
         ↓
-Client Tools + Skills + uiContext + Project Pack
+Client Tools + Resource Providers + Skills + uiContext + Project Pack
         ↓
 Spotlight Server + LLM（运行阶段 Runtime Agent）
         ↓
@@ -60,10 +60,10 @@ Use spotlight-integrate. Agentize this app with Spotlight. Follow architecture.m
 | 0     | 兼容性预检 + 前端能力地图                 | `COMPATIBILITY.md`, `FRONTEND_OVERVIEW.md` |
 | 1     | 从 Router/Store/Service/UI 中抽取候选能力 | `candidates/*`                             |
 | 1.5   | 验证并分类                                | `DIRECT / REFACTOR / GATED / REJECT`       |
-| 2     | 生成薄 Client Tool 适配器                 | `src/spotlight/tools.ts`                   |
+| 2     | 生成薄 Tool / Resource 适配器             | `src/spotlight/tools.ts`, `resources.ts`   |
 | 3     | 按业务域生成 Skills                       | `.inupedia/skills/**/SKILL.md`             |
 | 4     | Gold prompts + 压测设计                   | `gold-questions.md` / benchmark            |
-| 5     | Vue/Vite/Server Project Pack 接线         | config / env / project pack                |
+| 5     | Core/可选 UI/Server Project Pack 接线     | config / env / project pack                |
 | 6     | 输出可验收结果                            | `INTEGRATION_REPORT.md`                    |
 
 ## 四类能力
@@ -77,7 +77,7 @@ Use spotlight-integrate. Agentize this app with Spotlight. Follow architecture.m
 
 ## 兼容性
 
-兼容性分两轴：Core Agentization 与 UI Adapter。Vite JS/TS 宿主可注册 Tool 就能继续 Core 路径；Vue 3 + 兼容 peer 可直接装视觉壳，React/其他框架标记 `ADAPTER_REQUIRED`，并不等于 Agent 化失败。非 Vite 构建标记 `BUILD_MIGRATION_REQUIRED`，不擅自迁移。
+兼容性分两轴：Core Agentization 与 UI Adapter。任意能打包 JS/TS 的浏览器宿主都可用显式 `defineTool` 注册 Tool；Vite 只是额外提供自动推导。Vue 3 + 兼容 peer 可直接装视觉壳，React/其他框架标记 `ADAPTER_REQUIRED`，并不等于 Agent 化失败。只有宿主无法执行 Core Client 时才标记 `BUILD_MIGRATION_REQUIRED`。
 
 Spotlight npm 包版本必须从 **registry** 验证；不要假设 GitHub `main` 与 npm 已发布版本一致。
 
@@ -87,7 +87,8 @@ Spotlight npm 包版本必须从 **registry** 验证；不要假设 GitHub `main
 <app>/
 ├── src/spotlight/
 │   ├── config.ts
-│   └── tools.ts
+│   ├── tools.ts
+│   └── resources.ts             # 大型/动态实体目录才需要
 ├── .inupedia/skills/
 │   ├── skill.knowledge/SKILL.md
 │   └── skill.<domain>/SKILL.md
@@ -126,7 +127,7 @@ Spotlight 推荐：
 
 ## Router 边界
 
-通用 Spotlight Server **不能写死产品语义**。业务 Skill id、商品名、BIM 名称、监控工具名等都应留在宿主 Skill / Tool description / schema / uiContext 中。
+通用 Spotlight Server **不能写死产品语义**。业务 Skill id、商品名、BIM 名称、监控工具名等都应留在宿主 Skill / Tool / Resource Provider / uiContext 中。摄像头、资产、工单等大型动态目录由 Resource Provider 在运行时搜索、取状态并解析稳定 ID，不再塞进 Server Project Pack 或 LLM 提示词。
 
 Server 只处理通用语义：read/list、named open/view、mutation、clarify 等。
 
@@ -163,7 +164,7 @@ Server Provider key 不得放进 `VITE_*`。
 ```bash
 cd spotlight-project && docker compose up -d
 curl -sfS http://127.0.0.1:8787/health
-# 再启动宿主 Vite 应用，运行 gold prompts
+# 再启动宿主应用，运行 gold prompts
 ```
 
 发布前还要验证 `/v1/initialize`、thread/turn、SSE、host Tool 回执与 UI 状态变化，并对 dev/prod 代表性问题各重复至少 3 次。Server-only 发布只重建 Server 服务，数据库卷不动，健康失败回滚旧镜像。

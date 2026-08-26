@@ -7,6 +7,8 @@
   ·
   <a href="./docs/client-tools.md">Client Tools</a>
   ·
+  <a href="./docs/resource-providers.md">Resource Providers</a>
+  ·
   <a href="./docs/server-deployment.md">Server Deployment</a>
   ·
   <a href="./packages/README.md">Packages</a>
@@ -18,7 +20,7 @@ Spotlight is inspired by the interaction model behind **Apple's Spotlight**: sta
 
 We think frontend products are moving in the same direction. Users should not have to learn where every feature, page, report, control, or workflow lives before they can get work done. A modern product should offer one intelligent command surface that can **search, navigate, explain, and act** across the capabilities already inside it.
 
-Spotlight turns that idea into a framework-agnostic agent runtime for existing frontend products. It does not ask you to rebuild the UI or create a second “agent version” of the product. Instead, it connects natural-language intent to real Router / Store / Service / SDK capabilities through typed Client Tools, Skills, LangGraph, Knowledge, Memory, and recoverable Threads / Turns.
+Spotlight turns that idea into a framework-agnostic agent runtime for existing frontend products. It does not ask you to rebuild the UI or create a second “agent version” of the product. Instead, it connects natural-language intent to real Router / Store / Service / SDK capabilities through typed Client Tools, dynamic Resource Providers, Skills, LangGraph, Knowledge, Memory, and recoverable Threads / Turns.
 
 <p align="center">
   <img src="./assets/readme/demo.gif" width="100%" alt="Spotlight recognizes a request to view a camera and opens the matching live video in the host product">
@@ -38,12 +40,13 @@ Spotlight's architecture is **framework-agnostic**. This repository currently pr
 
 The architecture deliberately keeps product execution and agent orchestration separate:
 
-| Your product owns | Spotlight owns |
-| --- | --- |
-| Stable Router / Store / Service / SDK capabilities | Client Tool protocol and runtime invocation |
-| Business-facing Skills that describe when tools should be used | Skill routing, Knowledge, Actions, and multi-step orchestration |
-| `projectId`, Server URL, and stable user identity | Session state, long-term memory, Thread / Turn / Item lifecycle, and SSE recovery |
-| Existing permissions, state, and business constraints | Runtime coordination, reconnect behavior, and execution boundaries |
+| Your product owns                                              | Spotlight owns                                                                    |
+| -------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Stable Router / Store / Service / SDK capabilities             | Client Tool / Resource protocol and runtime invocation                            |
+| Dynamic entity search, aliases, live status and stable ids     | Deferred resource discovery and exact action routing                              |
+| Business-facing Skills that describe when tools should be used | Skill routing, Knowledge, Actions, and multi-step orchestration                   |
+| `projectId`, Server URL, and stable user identity              | Session state, long-term memory, Thread / Turn / Item lifecycle, and SSE recovery |
+| Existing permissions, state, and business constraints          | Runtime coordination, reconnect behavior, and execution boundaries                |
 
 Spotlight does not move business logic into the runtime. It creates a reliable execution layer **between user intent and real product capabilities**.
 
@@ -111,24 +114,29 @@ The repository currently ships `@inupedia/spotlight-vue`, so Vue 3 + Vite projec
 pnpm add @inupedia/spotlight-client @inupedia/spotlight-vue
 ```
 
-### 2. Wrap an existing capability as a Client Tool
+### 2. Register an existing dynamic resource and action
 
 ```ts
 // src/spotlight/tools.ts
-import { defineClientTool } from "@inupedia/spotlight-client";
+import { defineResourceProvider } from "@inupedia/spotlight-client";
 import { videoService } from "@/service/video";
 
-/** Play a named video in fullscreen. */
-export const playVideoFullscreen = defineClientTool(
-  async ({ name }: { name: string }): Promise<void> => {
-    await videoService.playFullscreen(name);
+export const videoResources = defineResourceProvider({
+  namespace: "video",
+  description: "video monitoring channels",
+  search: ({ query, limit }) => videoService.search(query, limit),
+  get: (id) => videoService.getById(id),
+  actions: {
+    playFullscreen: {
+      toolName: "playVideoFullscreen",
+      description: "Play one named video in fullscreen.",
+      handler: (video) => videoService.playFullscreenById(video.id),
+    },
   },
-);
-
-export const spotlightTools = [playVideoFullscreen];
+});
 ```
 
-In the current TypeScript / Vite adapter, Spotlight can derive tool metadata from the **exported symbol name + JSDoc + TypeScript types**, including the JSON Schema used by the runtime. Business code does not need to hand-write bulky LangChain tool metadata.
+The provider keeps large catalogs out of prompts and resolves names/aliases to stable ids at execution time. Vite projects can still derive ordinary Tool metadata from the **exported symbol name + JSDoc + TypeScript types**. Other JS/TS builds use explicit `defineTool` contracts without migrating to Vite.
 
 ### 3. Register Spotlight
 
@@ -139,9 +147,7 @@ import { SpotlightVue } from "@inupedia/spotlight-vue";
 import App from "./App.vue";
 import spotlightConfig from "./spotlight/config";
 
-createApp(App)
-  .use(SpotlightVue, spotlightConfig)
-  .mount("#app");
+createApp(App).use(SpotlightVue, spotlightConfig).mount("#app");
 ```
 
 For the complete Vite plugin, configuration, Skill loading, and environment-variable setup, see **[Client Tool / Skill Integration Guide](./docs/client-tools.md)**.
@@ -170,18 +176,18 @@ Spotlight Runtime remains responsible for:
 - Memory
 - model / provider integrations
 
-Generic server logic should not hard-code the semantics of a specific product. Product-specific meaning belongs in host Skills, tool descriptions, schemas, and `uiContext`.
+Generic server logic should not hard-code the semantics of a specific product. Product-specific meaning belongs in host Skills, Tool/Resource descriptions, schemas, and `uiContext`.
 
 ## Safety boundaries
 
 `spotlight-integrate` does not expose every discovered function automatically. Candidate capabilities are classified first:
 
-| Class | Meaning |
-| --- | --- |
-| `DIRECT` | A stable capability already exists and can be safely exposed as a Tool |
+| Class      | Meaning                                                                                                                      |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `DIRECT`   | A stable capability already exists and can be safely exposed as a Tool                                                       |
 | `REFACTOR` | The capability is real, but currently trapped inside component-local logic and should be extracted without changing behavior |
-| `GATED` | A sensitive action such as delete, payment, transfer, or submit; it should not be auto-exposed |
-| `REJECT` | A fabricated capability, arbitrary script / DOM executor, or another unsafe abstraction |
+| `GATED`    | A sensitive action such as delete, payment, transfer, or submit; it should not be auto-exposed                               |
+| `REJECT`   | A fabricated capability, arbitrary script / DOM executor, or another unsafe abstraction                                      |
 
 The goal is not to let the agent click everything. The goal is to expose **real, describable, verifiable business capabilities**.
 
@@ -229,13 +235,13 @@ If the host cannot provide a stable user identity, Spotlight should not silently
 
 ## Packages
 
-| Package | Role |
-| --- | --- |
-| `@inupedia/spotlight-protocol` | Shared client / server protocol |
-| `@inupedia/spotlight-client` | `defineClientTool`, App Client, Thread / Turn stream, and build-time tool manifest |
-| `@inupedia/spotlight-vue` | Current Vue adapter: plugin, command UI, Skill reporting, and browser execution pipeline |
-| `@inupedia/spotlight-memory` | Memory Gate and cache-backed storage |
-| `@inupedia/spotlight-server` | Deployable LangChain / LangGraph runtime |
+| Package                        | Role                                                                                     |
+| ------------------------------ | ---------------------------------------------------------------------------------------- |
+| `@inupedia/spotlight-protocol` | Shared client / server protocol                                                          |
+| `@inupedia/spotlight-client`   | `defineClientTool`, App Client, Thread / Turn stream, and build-time tool manifest       |
+| `@inupedia/spotlight-vue`      | Current Vue adapter: plugin, command UI, Skill reporting, and browser execution pipeline |
+| `@inupedia/spotlight-memory`   | Memory Gate and cache-backed storage                                                     |
+| `@inupedia/spotlight-server`   | Deployable LangChain / LangGraph runtime                                                 |
 
 See [`packages/README.md`](./packages/README.md) for the package-level overview.
 
@@ -285,13 +291,13 @@ Node-only capabilities must remain behind `/node` entry points and must not leak
 
 ## Further reading
 
-| Goal | Document |
-| --- | --- |
-| Use a Coding Agent to agentize an existing frontend product | [`skills/spotlight-integrate/README.md`](./skills/spotlight-integrate/README.md) |
-| Define Client Tools and Skills manually | [`docs/client-tools.md`](./docs/client-tools.md) |
-| Deploy Spotlight Server and the Project Pack | [`docs/server-deployment.md`](./docs/server-deployment.md) |
-| Review the deferred capability / replay design | [`docs/design/capability-protocol-v2.md`](./docs/design/capability-protocol-v2.md) |
-| Explore package structure | [`packages/README.md`](./packages/README.md) |
+| Goal                                                        | Document                                                                           |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Use a Coding Agent to agentize an existing frontend product | [`skills/spotlight-integrate/README.md`](./skills/spotlight-integrate/README.md)   |
+| Define Client Tools and Skills manually                     | [`docs/client-tools.md`](./docs/client-tools.md)                                   |
+| Deploy Spotlight Server and the Project Pack                | [`docs/server-deployment.md`](./docs/server-deployment.md)                         |
+| Review the deferred capability / replay design              | [`docs/design/capability-protocol-v2.md`](./docs/design/capability-protocol-v2.md) |
+| Explore package structure                                   | [`packages/README.md`](./packages/README.md)                                       |
 
 ---
 

@@ -13,13 +13,27 @@ export type RemoteToolCall = RemoteHostToolCall;
 export async function ensureHostToolsManifest(signal?: AbortSignal) {
   void signal;
   const config = getSpotlightConfig();
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+  const env = (
+    import.meta as ImportMeta & { env?: Record<string, string | undefined> }
+  ).env;
   const frontendBuildId =
-    config.frontendBuildId?.trim() || env?.VITE_BUILD_SHA?.trim() || "development";
+    config.frontendBuildId?.trim() ||
+    env?.VITE_BUILD_SHA?.trim() ||
+    "development";
+  const resources =
+    typeof config.resources === "function"
+      ? config.resources()
+      : (config.resources ?? []);
+  const tools = [
+    ...(typeof config.tools === "function"
+      ? config.tools()
+      : (config.tools ?? [])),
+    ...resources.flatMap((resource) => resource.tools),
+  ];
   const manifest = await createClientToolManifest({
     projectId: config.projectId,
     frontendBuildId,
-    tools: typeof config.tools === "function" ? config.tools() : config.tools,
+    tools,
   });
   return manifest;
 }
@@ -41,10 +55,23 @@ export async function executeRemoteHostTool(
     };
   }
   try {
-    const data = await registry.execute(call.name, call.input);
+    const result = await registry.executeResult(call.name, call.input);
+    if (!result.success) {
+      return {
+        success: false,
+        error: result.error.message,
+        errorCode:
+          result.error.code === "TOOL_INPUT_INVALID" ||
+          result.error.code === "TOOL_OUTPUT_INVALID"
+            ? result.error.code
+            : "TOOL_RUN_FAILED",
+        trace: [],
+        executionTarget: "host",
+      };
+    }
     return {
       success: true,
-      data,
+      data: result,
       trace: [],
       executionTarget: "host",
     };

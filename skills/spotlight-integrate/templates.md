@@ -78,6 +78,60 @@ export const switchMainTab = defineClientTool(
 
 Enum values come from the host store/router, never from this template.
 
+## Explicit Tool for non-Vite builds
+
+```ts
+import { defineTool } from "@inupedia/spotlight-client";
+
+export const openItem = defineTool({
+  name: "openItem",
+  description: "按用户给出的名称打开已有资源。",
+  schema: {
+    input: {
+      type: "object",
+      properties: { name: { type: "string", minLength: 1 } },
+      required: ["name"],
+      additionalProperties: false,
+    },
+    output: { type: "null" },
+  },
+  sideEffect: "ui",
+  replayPolicy: "never",
+  riskLevel: "low",
+  handler: async ({ name }: { name: string }) => openItemByName(name),
+});
+```
+
+This path is framework/build-tool neutral. Do not migrate a non-Vite host only
+to obtain automatic metadata inference.
+
+## Dynamic Resource Provider
+
+```ts
+import { defineResourceProvider } from "@inupedia/spotlight-client";
+
+export const itemResources = defineResourceProvider({
+  namespace: "item",
+  description: "宿主项目中的资源",
+  search: async ({ query, limit }) => ({
+    items: await itemService.search(query, limit),
+  }),
+  get: async (id) => itemService.getById(id),
+  actions: {
+    open: {
+      toolName: "openItem",
+      description: "按名称、别名或稳定 ID 打开一个已有资源。",
+      handler: async (resource) => openItemById(resource.id),
+    },
+  },
+});
+```
+
+Every returned item must have a stable `id` and display `name`; add `aliases`
+and live `status` when the host provides them. The generated action accepts
+`{ query: string }`, resolves exactly one item, then calls the handler by stable
+id. Use `skill: false` when a richer hand-written domain Skill already exists.
+
 ## `src/spotlight/config.ts`
 
 ```ts
@@ -87,6 +141,7 @@ import {
   readSpotlightEnv,
 } from "@inupedia/spotlight-vue";
 import { spotlightTools } from "./tools";
+import { itemResources } from "./resources";
 
 const skills = loadBundledSkillsFromGlob(
   import.meta.glob("../../.inupedia/skills/**/SKILL.md", {
@@ -100,6 +155,7 @@ export default defineSpotlightConfig({
   ...readSpotlightEnv(import.meta.env, { projectId: "your-project-id" }),
   frontendBuildId: import.meta.env.VITE_BUILD_SHA,
   tools: spotlightTools,
+  resources: [itemResources],
   skills,
   getUiContext: () => ({
     routePath: window.location.pathname,

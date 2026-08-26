@@ -62,6 +62,10 @@ export interface CapabilityProtocolErrorV1 {
 
 export interface FrontendToolDescriptorV1 {
   name: string;
+  /** Logical capability namespace used for grouping and deferred discovery. */
+  namespace?: string;
+  /** Keep the full schema out of the default action surface until its Skill is selected. */
+  deferLoading?: boolean;
   version: string;
   description: string;
   inputSchema: JsonSchemaV1;
@@ -73,6 +77,13 @@ export interface FrontendToolDescriptorV1 {
   replayPolicy: ToolReplayPolicyV1;
   riskLevel?: ToolRiskLevelV1;
   requiresConfirmation?: boolean;
+  /** Optional resource semantics understood by the generic Spotlight router. */
+  resource?: {
+    namespace: string;
+    operation: "search" | "get" | "action";
+    action?: string;
+    inputKey?: string;
+  };
 }
 
 /**

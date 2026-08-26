@@ -5,7 +5,10 @@ import type { FrontendToolManifestV1 } from "./capabilities.js";
 export * from "./capabilities.js";
 export * from "./capabilitySecurity.js";
 export * from "./lifecycle.js";
+export * from "./jsonSchema.js";
+export * from "./resources.js";
 export * from "./schema.js";
+export * from "./toolResults.js";
 
 export type ToolExecutionTarget = "runtime" | "host";
 
@@ -22,6 +25,8 @@ export type AgentToolErrorCode =
   | "PREREQUISITE_FAILED"
   | "PRECONDITION_FAILED"
   | "TOOL_APPROVAL_REQUIRED"
+  | "TOOL_INPUT_INVALID"
+  | "TOOL_OUTPUT_INVALID"
   | "TOOL_RUN_FAILED"
   | "TOOL_TIMEOUT";
 
@@ -194,9 +199,10 @@ export interface SpotlightSkill {
 export function spotlightSkillToolNames(
   skill: Pick<SpotlightSkill, "allowedTools" | "dependencies">,
 ): string[] {
-  const dependencies = skill.dependencies?.tools.map((tool) =>
-    typeof tool === "string" ? tool : tool.value,
-  ) ?? [];
+  const dependencies =
+    skill.dependencies?.tools.map((tool) =>
+      typeof tool === "string" ? tool : tool.value,
+    ) ?? [];
   return Array.from(new Set([...dependencies, ...(skill.allowedTools ?? [])]));
 }
 
@@ -300,11 +306,7 @@ export interface HostToolResultRequest {
  * the browser went away mid-call; the run stays alive so a reconnect can resume it.
  */
 export type SpotlightRunStatus =
-  | "running"
-  | "waiting_for_host"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  "running" | "waiting_for_host" | "completed" | "failed" | "cancelled";
 
 export interface SpotlightRunSummary {
   steps: number;

@@ -219,7 +219,10 @@ export function clientToolTier(tool: FrontendToolDescriptorV1): ToolTierV1 {
 export function isDispatchableClientTool(
   tool: FrontendToolDescriptorV1,
 ): boolean {
-  return isToolTierReplaySafe(clientToolTier(tool)) || tool.requiresConfirmation === true;
+  return (
+    isToolTierReplaySafe(clientToolTier(tool)) ||
+    tool.requiresConfirmation === true
+  );
 }
 
 export class UnsupportedToolTierError extends Error {
@@ -246,9 +249,10 @@ export function assertRegisterableClientTools(
   tools: readonly FrontendToolDescriptorV1[],
 ): void {
   const rejected = tools
-    .filter((tool) =>
-      !isToolTierReplaySafe(clientToolTier(tool)) &&
-      tool.requiresConfirmation !== true,
+    .filter(
+      (tool) =>
+        !isToolTierReplaySafe(clientToolTier(tool)) &&
+        tool.requiresConfirmation !== true,
     )
     .map((tool) => ({ name: tool.name, tier: clientToolTier(tool) }));
   if (rejected.length > 0) throw new UnsupportedToolTierError(rejected);
@@ -269,6 +273,7 @@ export function actionToolAllowlist(
     if (!isDispatchableClientTool(tool)) return false;
     if (requested.size > 0) return requested.has(tool.name);
     if (hasSkillMatch) return false;
+    if (tool.deferLoading) return false;
     return true;
   };
   return tools.filter(filterTool);

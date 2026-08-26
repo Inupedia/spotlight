@@ -1,8 +1,8 @@
 # Stage 2 — Generate Client Tools
 
-Input: `verified.md`. Output: one Client Tool module parsed by the Spotlight Vite plugin.
+Input: `verified.md`. Output: one Client Tool module and, when needed, one Resource Provider module.
 
-Default path is `src/spotlight/tools.ts`. If the host already has `defineClientTool`, extend the existing module and registry instead of creating a second entrypoint.
+Default path is `src/spotlight/tools.ts`; use `src/spotlight/resources.ts` only for dynamic catalogs. If the host already has Spotlight registrations, extend them instead of creating a second entrypoint.
 
 ## Wrapper law
 
@@ -24,19 +24,20 @@ The handler is an adapter, not a new business implementation.
 
 Set metadata from verified host semantics:
 
-| Capability | sideEffect | replayPolicy | riskLevel |
-|---|---|---|---|
-| read/list/status only | `none` | `safe` | usually `low` |
-| open/view/navigation | `ui` | usually `never` | usually `low` |
-| reversible mutation | `ui` or `external` | `never` or host-backed idempotency | usually `medium` |
-| destructive/irreversible/external commit | `GATED` in stage 1.5 | do not auto-wrap | high |
+| Capability                               | sideEffect           | replayPolicy                       | riskLevel        |
+| ---------------------------------------- | -------------------- | ---------------------------------- | ---------------- |
+| read/list/status only                    | `none`               | `safe`                             | usually `low`    |
+| open/view/navigation                     | `ui`                 | usually `never`                    | usually `low`    |
+| reversible mutation                      | `ui` or `external`   | `never` or host-backed idempotency | usually `medium` |
+| destructive/irreversible/external commit | `GATED` in stage 1.5 | do not auto-wrap                   | high             |
 
 Do not rely on default metadata when the Tool is a mutation.
 
 ## Tool shape rules
 
 - name = exported const name, camelCase, verb-first (`getX`, `openX`, `addX`, `updateX`, `removeX`, `navigateToX`)
-- JSDoc immediately above `defineClientTool`; the Vite plugin uses it as Tool description
+- Vite path: JSDoc immediately above `defineClientTool`; the compiler uses it as Tool description
+- non-Vite path: explicit `defineTool({ name, description, schema, handler })`
 - inline typed handler so the plugin can infer parameters
 - zero args: `async (): Promise<...>`
 - object input: `async ({ name }: { name: string })`
@@ -52,7 +53,26 @@ Inputs should reflect what users and host code actually understand:
 - mutation -> exact quantity/value/id validated by the host
 - route/tab/mode -> literal values from host Router/Store
 
-Reuse existing host resolver/validation functions. Do not recreate alias lookup or business validation in `tools.ts`.
+Reuse existing host business validation. For large/dynamic catalogs, move search,
+alias matching, live status and stable-id resolution into a Resource Provider;
+do not recreate those rules in each action Tool or Skill.
+
+## Resource decision
+
+Create `defineResourceProvider` when at least one is true:
+
+- the target set is runtime-backed or expected to grow beyond a small static list;
+- entities have aliases, online/offline state, permissions or tenant scoping;
+- more than one action uses the same target type;
+- placing all entity names in Tool schemas or Skill text would bloat the manifest/prompt.
+
+Keep a plain Tool when it has no target catalog or only accepts a small, stable enum
+that is genuinely part of the operation contract.
+
+Each Resource action takes a required `query` containing the user's original target
+wording. The provider resolves exactly one item and calls the existing host action
+with its stable id. Missing, ambiguous or unavailable targets must fail before the
+action runs.
 
 ## Refactor boundary
 
@@ -69,6 +89,7 @@ Keep the registry mechanically aligned:
 
 ```ts
 export const spotlightTools = [getItemList, openItem, updateItem];
+export const spotlightResources = [itemResourceProvider];
 ```
 
 Every Skill tool must be registered; no extra “hidden” generic executor.

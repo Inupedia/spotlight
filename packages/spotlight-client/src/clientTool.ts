@@ -1,10 +1,13 @@
 import {
   deriveToolTier,
   isToolTierReplaySafe,
+  normalizeSpotlightToolOutput,
   SPOTLIGHT_CAPABILITY_PROTOCOL_V1,
+  validateJsonSchemaValue,
   type FrontendToolDescriptorV1,
   type FrontendToolManifestV1,
   type JsonSchemaV1,
+  type SpotlightToolResultEnvelope,
   type ToolReplayPolicyV1,
   type ToolRiskLevelV1,
   type ToolSideEffectV1,
@@ -33,6 +36,9 @@ export interface ClientToolOptions {
   riskLevel?: ToolRiskLevelV1;
   requiresConfirmation?: boolean;
   maxOutputBytes?: number;
+  namespace?: string;
+  deferLoading?: boolean;
+  resource?: FrontendToolDescriptorV1["resource"];
 }
 
 export interface GeneratedClientToolMeta extends ClientToolOptions {
@@ -45,21 +51,41 @@ export type ClientToolHandler<TInput, TOutput> = (
   input: TInput,
 ) => TOutput | Promise<TOutput>;
 
-export type ClientTool<TInput = never, TOutput = unknown> =
-  ClientToolHandler<TInput, TOutput> & {
-    readonly [CLIENT_TOOL_META]: GeneratedClientToolMeta;
-  };
+export type ClientTool<TInput = never, TOutput = unknown> = ClientToolHandler<
+  TInput,
+  TOutput
+> & {
+  readonly [CLIENT_TOOL_META]: GeneratedClientToolMeta;
+};
+
+export interface DefineToolOptions<TInput, TOutput> extends ClientToolOptions {
+  name: string;
+  description: string;
+  schema: ClientToolSchemaOverride;
+  handler: ClientToolHandler<TInput, TOutput>;
+}
+
+export class SpotlightToolValidationError extends Error {
+  constructor(
+    readonly code: "TOOL_INPUT_INVALID" | "TOOL_OUTPUT_INVALID",
+    message: string,
+    readonly issues: Array<{ path: string; message: string }>,
+  ) {
+    super(message);
+    this.name = "SpotlightToolValidationError";
+  }
+}
 
 function isGeneratedMeta(
   value: ClientToolOptions | GeneratedClientToolMeta | undefined,
 ): value is GeneratedClientToolMeta {
   return Boolean(
     value &&
-      "name" in value &&
-      typeof value.name === "string" &&
-      "description" in value &&
-      typeof value.description === "string" &&
-      value.schema?.input,
+    "name" in value &&
+    typeof value.name === "string" &&
+    "description" in value &&
+    typeof value.description === "string" &&
+    value.schema?.input,
   );
 }
 
@@ -85,6 +111,14 @@ export function defineClientTool<TInput = void, TOutput = void>(
   return handler as ClientTool<TInput, TOutput>;
 }
 
+/** Framework/build-tool neutral Tool definition for non-Vite and generated capabilities. */
+export function defineTool<TInput = void, TOutput = void>(
+  options: DefineToolOptions<TInput, TOutput>,
+): ClientTool<TInput, TOutput> {
+  const { handler, name, description, schema, ...metadata } = options;
+  return defineClientTool(handler, { name, description, schema, ...metadata });
+}
+
 export function getClientToolDescriptor(
   tool: ClientTool,
 ): FrontendToolDescriptorV1 {
@@ -97,12 +131,15 @@ export function getClientToolDescriptor(
   } as const;
   return {
     name: meta.name,
+    namespace: meta.namespace,
+    deferLoading: meta.deferLoading,
     version: meta.version ?? "1.0.0",
     description: meta.description,
     inputSchema: meta.schema.input,
     outputSchema: meta.schema.output,
     maxOutputBytes: meta.maxOutputBytes,
     tier: deriveToolTier({ tier: meta.tier, ...legacy }),
+    resource: meta.resource,
     ...legacy,
   };
 }
@@ -138,7 +175,55 @@ export function createClientToolRegistry(tools: readonly ClientTool[]) {
     async execute(name: string, input: unknown): Promise<unknown> {
       const tool = byName.get(name);
       if (!tool) throw new Error(`Client tool is not registered: ${name}`);
-      return (tool as unknown as ClientToolHandler<unknown, unknown>)(input);
+      const descriptor = getClientToolDescriptor(tool);
+      const inputValidation = validateJsonSchemaValue(
+        input,
+        descriptor.inputSchema,
+      );
+      if (!inputValidation.valid) {
+        throw new SpotlightToolValidationError(
+          "TOOL_INPUT_INVALID",
+          `Client tool input is invalid: ${name}`,
+          inputValidation.issues,
+        );
+      }
+      const output = await (
+        tool as unknown as ClientToolHandler<unknown, unknown>
+      )(input);
+      if (descriptor.outputSchema) {
+        const outputValidation = validateJsonSchemaValue(
+          output,
+          descriptor.outputSchema,
+        );
+        if (!outputValidation.valid) {
+          throw new SpotlightToolValidationError(
+            "TOOL_OUTPUT_INVALID",
+            `Client tool output is invalid: ${name}`,
+            outputValidation.issues,
+          );
+        }
+      }
+      return output;
+    },
+    async executeResult(
+      name: string,
+      input: unknown,
+    ): Promise<SpotlightToolResultEnvelope> {
+      try {
+        return normalizeSpotlightToolOutput(await this.execute(name, input));
+      } catch (error) {
+        const validation =
+          error instanceof SpotlightToolValidationError ? error : null;
+        return {
+          success: false,
+          error: {
+            code: validation?.code ?? "TOOL_RUN_FAILED",
+            message: error instanceof Error ? error.message : String(error),
+            retryable: false,
+            ...(validation ? { details: { issues: validation.issues } } : {}),
+          },
+        };
+      }
     },
   };
 }
@@ -167,23 +252,21 @@ async function sha256(value: string): Promise<string> {
 }
 
 const SHA256_INITIAL_STATE = [
-  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f,
-  0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+  0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c,
+  0x1f83d9ab, 0x5be0cd19,
 ] as const;
 
 const SHA256_ROUND_CONSTANTS = [
-  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b,
-  0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
-  0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7,
-  0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc,
-  0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152,
-  0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
-  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-  0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
-  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819,
-  0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08,
-  0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f,
-  0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+  0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+  0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+  0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+  0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+  0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+  0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+  0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
   0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ] as const;
 
@@ -226,12 +309,18 @@ function sha256Fallback(bytes: Uint8Array): Uint8Array {
 
     let [a, b, c, d, e, f, g, h] = state;
     for (let index = 0; index < 64; index += 1) {
-      const sum1 = rotateRight(e!, 6) ^ rotateRight(e!, 11) ^ rotateRight(e!, 25);
+      const sum1 =
+        rotateRight(e!, 6) ^ rotateRight(e!, 11) ^ rotateRight(e!, 25);
       const choose = (e! & f!) ^ (~e! & g!);
       const temporary1 =
-        (h! + sum1 + choose + SHA256_ROUND_CONSTANTS[index]! + words[index]!) >>>
+        (h! +
+          sum1 +
+          choose +
+          SHA256_ROUND_CONSTANTS[index]! +
+          words[index]!) >>>
         0;
-      const sum0 = rotateRight(a!, 2) ^ rotateRight(a!, 13) ^ rotateRight(a!, 22);
+      const sum0 =
+        rotateRight(a!, 2) ^ rotateRight(a!, 13) ^ rotateRight(a!, 22);
       const majority = (a! & b!) ^ (a! & c!) ^ (b! & c!);
       const temporary2 = (sum0 + majority) >>> 0;
       h = g;

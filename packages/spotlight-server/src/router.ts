@@ -1,6 +1,9 @@
 import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
-import type { FrontendToolDescriptorV1 } from "@inupedia/spotlight-protocol";
+import {
+  validateJsonSchemaValue,
+  type FrontendToolDescriptorV1,
+} from "@inupedia/spotlight-protocol";
 import type { SpotlightSkill } from "@inupedia/spotlight-protocol";
 import { z } from "zod";
 import type { IntentDecision } from "./contracts.js";
@@ -12,6 +15,7 @@ import {
 import { attachKnowledgeSource } from "./knowledgeSource.js";
 import {
   candidateToolsForSkillRoute,
+  enrichSkillToolRoute,
   routeViaExactToolExample,
   routeViaNamedTargetCatalog,
   routeViaSkillCatalog,
@@ -301,6 +305,23 @@ export function applyToolInputCompletenessFence(
       requestedToolInput: undefined,
     };
   }
+  if (selectedTool) {
+    const validation = validateJsonSchemaValue(
+      normalizedDecision.requestedToolInput ?? {},
+      selectedTool.inputSchema,
+    );
+    if (!validation.valid) {
+      return {
+        ...normalizedDecision,
+        route: "clarify",
+        reason: `The selected client tool input does not satisfy its schema: ${validation.issues
+          .map((issue) => `${issue.path} ${issue.message}`)
+          .join("; ")}.`,
+        requestedToolNames: [],
+        requestedToolInput: undefined,
+      };
+    }
+  }
   return normalizedDecision;
 }
 
@@ -327,6 +348,13 @@ export class LangChainIntentRouter implements IntentRouter {
     clientTools: FrontendToolDescriptorV1[],
     route: SkillRouteResult,
   ): Promise<SkillRouteResult> {
+    const initialToolName = route.requestedToolNames[0];
+    const initialTool = clientTools.find(
+      (item) => item.name === initialToolName,
+    );
+    if (initialTool?.resource?.operation === "action") {
+      route = enrichSkillToolRoute(question, route, skills, clientTools);
+    }
     const toolName = route.requestedToolNames[0];
     const tool = clientTools.find((item) => item.name === toolName);
     if (!tool) return route;

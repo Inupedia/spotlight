@@ -376,6 +376,56 @@ describe("LangChain intent router", () => {
     });
   });
 
+  it("copies an exact resource target into the required query without a model guess", async () => {
+    const router = new LangChainIntentRouter(new FakeToolCallingModel());
+    const decision = await router.route(
+      "我想看一下钢筋棚加工区2",
+      [
+        {
+          name: "playVideoFullscreen",
+          namespace: "video",
+          version: "1.0.0",
+          description: "播放指定视频资源",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", minLength: 1 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          resource: {
+            namespace: "video",
+            operation: "action",
+            action: "play",
+            inputKey: "query",
+          },
+          sideEffect: "ui",
+          replayPolicy: "safe",
+          riskLevel: "low",
+        },
+      ],
+      [
+        {
+          name: "skill.monitoring",
+          description: "现场监控",
+          allowedTools: ["playVideoFullscreen"],
+          responseStrategy: "tool_answer",
+          toolExamples: [
+            {
+              example: "我想看一下钢筋棚加工区2",
+              toolName: "playVideoFullscreen",
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(decision).toMatchObject({
+      route: "action",
+      requestedToolNames: ["playVideoFullscreen"],
+      requestedToolInput: { query: "钢筋棚加工区2" },
+    });
+  });
+
   it("infers a read-only tool when the skill route omits requestedToolNames", async () => {
     const model = new FakeToolCallingModel({
       structuredResponse: {

@@ -24,6 +24,7 @@ import {
   createClientToolRegistry,
   type ClientTool,
 } from "./clientTool.js";
+import type { SpotlightResourceProvider } from "./resourceProvider.js";
 
 export interface SpotlightAppClientOptions extends SpotlightClientConfig {
   toolManifest?:
@@ -31,6 +32,10 @@ export interface SpotlightAppClientOptions extends SpotlightClientConfig {
     | (() => FrontendToolManifestV1 | Promise<FrontendToolManifestV1>);
   /** Preferred: register Tools and let the SDK derive and snapshot the manifest. */
   tools?: readonly ClientTool[] | (() => readonly ClientTool[]);
+  /** Resource providers generate search/get/action Tools and optional Skills. */
+  resources?:
+    | readonly SpotlightResourceProvider[]
+    | (() => readonly SpotlightResourceProvider[]);
   frontendBuildId?: string;
   skills?:
     | Array<SpotlightSkill | SpotlightSkillRegistration>
@@ -63,7 +68,10 @@ function valueOf<T>(value: T | (() => T)): T {
 
 function normalizeSkills(
   skills: Array<SpotlightSkill | SpotlightSkillRegistration>,
-): { registrations: SpotlightSkillRegistration[]; definitions: SpotlightSkill[] } {
+): {
+  registrations: SpotlightSkillRegistration[];
+  definitions: SpotlightSkill[];
+} {
   const definitions = skills.map((skill) => {
     const candidate = skill as SpotlightSkill & SpotlightSkillRegistration;
     return {
@@ -81,7 +89,8 @@ function normalizeSkills(
       description: skill.description,
       version: skill.version,
       allowImplicitInvocation:
-        skill.policy?.allowImplicitInvocation ?? skill.disableModelInvocation !== true,
+        skill.policy?.allowImplicitInvocation ??
+        skill.disableModelInvocation !== true,
       userInvocable: skill.userInvocable,
       dependencies: { tools: spotlightSkillToolNames(skill) },
     })),
@@ -97,19 +106,23 @@ export interface SpotlightRunResult {
   summary?: Extract<SpotlightTurnEvent, { type: "turn.completed" }>["summary"];
 }
 
-export interface SpotlightRunOptions extends Omit<SpotlightTurnStartRequest, "input"> {
+export interface SpotlightRunOptions extends Omit<
+  SpotlightTurnStartRequest,
+  "input"
+> {
   signal?: AbortSignal;
   threadId?: string;
 }
 
 export interface SpotlightThreadHandle {
   readonly id: string | undefined;
-  run(input: string, options?: Omit<SpotlightRunOptions, "threadId">): Promise<SpotlightRunResult>;
+  run(
+    input: string,
+    options?: Omit<SpotlightRunOptions, "threadId">,
+  ): Promise<SpotlightRunResult>;
 }
 
-async function asyncValueOf<T>(
-  value: T | (() => T | Promise<T>),
-): Promise<T> {
+async function asyncValueOf<T>(value: T | (() => T | Promise<T>)): Promise<T> {
   return typeof value === "function"
     ? await (value as () => T | Promise<T>)()
     : value;
@@ -153,18 +166,19 @@ export class SpotlightAppClient {
   private initialization: Promise<SpotlightInitializeResponse> | null = null;
   private initializedDigest: string | null = null;
   private capabilitySessionId: string | null = null;
-  private toolRegistry: ReturnType<typeof createClientToolRegistry> | null = null;
+  private toolRegistry: ReturnType<typeof createClientToolRegistry> | null =
+    null;
 
   constructor(private readonly options: SpotlightAppClientOptions) {
     this.http = createSpotlightHttp(options);
   }
 
   private async manifest(): Promise<FrontendToolManifestV1> {
-    if (this.options.toolManifest) return asyncValueOf(this.options.toolManifest);
-    if (!this.options.tools) {
-      throw new Error("Spotlight requires tools or toolManifest");
-    }
-    const tools = valueOf(this.options.tools);
+    if (this.options.toolManifest)
+      return asyncValueOf(this.options.toolManifest);
+    const tools = this.resolveTools();
+    if (tools.length === 0)
+      throw new Error("Spotlight requires tools, resources or toolManifest");
     this.toolRegistry = createClientToolRegistry(tools);
     return createClientToolManifest({
       projectId: this.options.projectId,
@@ -173,43 +187,70 @@ export class SpotlightAppClient {
     });
   }
 
+  private resolveResources(): readonly SpotlightResourceProvider[] {
+    return this.options.resources ? valueOf(this.options.resources) : [];
+  }
+
+  private resolveTools(): readonly ClientTool[] {
+    const direct = this.options.tools ? valueOf(this.options.tools) : [];
+    return [
+      ...direct,
+      ...this.resolveResources().flatMap((resource) => resource.tools),
+    ];
+  }
+
+  private resolveSkills(): Array<SpotlightSkill | SpotlightSkillRegistration> {
+    const direct = this.options.skills ? valueOf(this.options.skills) : [];
+    const generated = this.resolveResources().flatMap((resource) =>
+      resource.skill ? [resource.skill] : [],
+    );
+    return [...direct, ...generated];
+  }
+
   async initialize(signal?: AbortSignal): Promise<SpotlightInitializeResponse> {
     const manifest = await this.manifest();
-    if (this.initialization && this.initializedDigest === manifest.manifestDigest) {
+    if (
+      this.initialization &&
+      this.initializedDigest === manifest.manifestDigest
+    ) {
       return this.initialization;
     }
     this.initializedDigest = manifest.manifestDigest;
-    const normalizedSkills = normalizeSkills(
-      this.options.skills ? valueOf(this.options.skills) : [],
-    );
-    this.initialization = this.http.postJson<SpotlightInitializeResponse>(
-      "/v1/initialize",
-      {
-        protocolVersion: SPOTLIGHT_APP_PROTOCOL_V1,
-        projectId: this.options.projectId,
-        clientInfo: {
-          name: this.options.clientInfo?.name ?? "spotlight-typescript",
-          title: this.options.clientInfo?.title,
-          version: this.options.clientInfo?.version ?? "0.7.1",
+    const normalizedSkills = normalizeSkills(this.resolveSkills());
+    this.initialization = this.http
+      .postJson<SpotlightInitializeResponse>(
+        "/v1/initialize",
+        {
+          protocolVersion: SPOTLIGHT_APP_PROTOCOL_V1,
+          projectId: this.options.projectId,
+          clientInfo: {
+            name: this.options.clientInfo?.name ?? "spotlight-typescript",
+            title: this.options.clientInfo?.title,
+            version: this.options.clientInfo?.version ?? "0.8.0",
+          },
+          capabilities: defaultSpotlightClientCapabilities(),
+          toolManifest: manifest,
+          skills: normalizedSkills.registrations,
+          skillDefinitions: normalizedSkills.definitions,
         },
-        capabilities: defaultSpotlightClientCapabilities(),
-        toolManifest: manifest,
-        skills: normalizedSkills.registrations,
-        skillDefinitions: normalizedSkills.definitions,
-      },
-      signal,
-    ).then((response) => {
-      this.capabilitySessionId = response.capabilitySession.id;
-      return response;
-    }).catch((error) => {
-      this.initialization = null;
-      this.capabilitySessionId = null;
-      throw error;
-    });
+        signal,
+      )
+      .then((response) => {
+        this.capabilitySessionId = response.capabilitySession.id;
+        return response;
+      })
+      .catch((error) => {
+        this.initialization = null;
+        this.capabilitySessionId = null;
+        throw error;
+      });
     return this.initialization;
   }
 
-  async startThread(threadId?: string, signal?: AbortSignal): Promise<SpotlightThread> {
+  async startThread(
+    threadId?: string,
+    signal?: AbortSignal,
+  ): Promise<SpotlightThread> {
     await this.initialize(signal);
     const response = await this.http.postJson<{ thread: SpotlightThread }>(
       "/v1/threads",
@@ -226,7 +267,10 @@ export class SpotlightAppClient {
         return resolvedId;
       },
       run: async (input, options = {}) => {
-        const result = await this.run(input, { ...options, threadId: resolvedId });
+        const result = await this.run(input, {
+          ...options,
+          threadId: resolvedId,
+        });
         resolvedId = result.thread.id;
         return result;
       },
@@ -241,7 +285,10 @@ export class SpotlightAppClient {
     return response.threads;
   }
 
-  async forkThread(threadId: string, signal?: AbortSignal): Promise<SpotlightThread> {
+  async forkThread(
+    threadId: string,
+    signal?: AbortSignal,
+  ): Promise<SpotlightThread> {
     const response = await this.http.postJson<{ thread: SpotlightThread }>(
       `/v1/threads/${encodeURIComponent(threadId)}/fork`,
       {},
@@ -256,15 +303,23 @@ export class SpotlightAppClient {
     signal?: AbortSignal,
   ): Promise<SpotlightTurn> {
     await this.initialize(signal);
-    const start = () => this.http.postJson<{ turn: SpotlightTurn }>(
-      `/v1/threads/${encodeURIComponent(threadId)}/turns`,
-      { ...request, capabilitySessionId: request.capabilitySessionId ?? this.capabilitySessionId },
-      signal,
-    );
+    const start = () =>
+      this.http.postJson<{ turn: SpotlightTurn }>(
+        `/v1/threads/${encodeURIComponent(threadId)}/turns`,
+        {
+          ...request,
+          capabilitySessionId:
+            request.capabilitySessionId ?? this.capabilitySessionId,
+        },
+        signal,
+      );
     try {
       return (await start()).turn;
     } catch (error) {
-      if (!(error instanceof SpotlightHttpError) || error.code !== "CAPABILITY_SESSION_EXPIRED") {
+      if (
+        !(error instanceof SpotlightHttpError) ||
+        error.code !== "CAPABILITY_SESSION_EXPIRED"
+      ) {
         throw error;
       }
       this.initialization = null;
@@ -288,9 +343,16 @@ export class SpotlightAppClient {
     let summary: SpotlightRunResult["summary"];
     for await (const event of this.streamTurn(turn.id, signal)) {
       events.push(event);
-      if (event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed") {
+      if (
+        event.type === "item.started" ||
+        event.type === "item.updated" ||
+        event.type === "item.completed"
+      ) {
         items.set(event.item.id, event.item);
-        const clientRequest = event.item.type === "tool_call" ? event.item.clientRequest : undefined;
+        const clientRequest =
+          event.item.type === "tool_call"
+            ? event.item.clientRequest
+            : undefined;
         if (
           event.item.type === "tool_call" &&
           event.item.status === "waiting_for_client" &&
@@ -309,20 +371,34 @@ export class SpotlightAppClient {
           const result = !approved
             ? { success: false, error: "Tool execution was not approved" }
             : this.options.executeTool
-              ? await this.options.executeTool({ turnId: turn.id, item: event.item })
+              ? await this.options.executeTool({
+                  turnId: turn.id,
+                  item: event.item,
+                })
               : this.toolRegistry?.has(event.item.tool)
-                ? {
-                    success: true,
-                    output: await this.toolRegistry.execute(
-                      event.item.tool,
-                      event.item.arguments,
-                    ),
-                  }
-              : { success: false, error: `Client tool is not registered: ${event.item.tool}` };
-          await this.submitToolResult(turn.id, {
-            correlationId: clientRequest.correlationId,
-            ...result,
-          }, signal);
+                ? await this.toolRegistry
+                    .executeResult(event.item.tool, event.item.arguments)
+                    .then((result) =>
+                      result.success
+                        ? { success: true, output: result }
+                        : {
+                            success: false,
+                            error: result.error.message,
+                            errorCode: result.error.code,
+                          },
+                    )
+                : {
+                    success: false,
+                    error: `Client tool is not registered: ${event.item.tool}`,
+                  };
+          await this.submitToolResult(
+            turn.id,
+            {
+              correlationId: clientRequest.correlationId,
+              ...result,
+            },
+            signal,
+          );
         }
       } else if (event.type === "turn.failed") {
         throw new Error(event.error.message);
@@ -331,7 +407,14 @@ export class SpotlightAppClient {
         summary = event.summary;
       }
     }
-    return { thread, turn, events, items: [...items.values()], finalResponse, summary };
+    return {
+      thread,
+      turn,
+      events,
+      items: [...items.values()],
+      finalResponse,
+      summary,
+    };
   }
 
   async *streamTurn(
@@ -376,7 +459,10 @@ export class SpotlightAppClient {
             if (event.seq <= lastSeq) continue;
             lastSeq = event.seq;
             yield event;
-            if (event.type === "turn.completed" || event.type === "turn.failed") {
+            if (
+              event.type === "turn.completed" ||
+              event.type === "turn.failed"
+            ) {
               terminal = true;
               return;
             }

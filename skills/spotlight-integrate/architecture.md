@@ -18,6 +18,7 @@ user language
   -> Spotlight Client lifecycle (initialize/thread/turn/SSE)
   -> Spotlight Server LangGraph router
   -> host Skill (intent + allowed-tools)
+  -> optional Resource Provider (search/get/resolve dynamic entities)
   -> Client Tool (typed adapter + safety metadata)
   -> existing Store / Service / Router / page engine
   -> existing UI or business state
@@ -59,6 +60,7 @@ Generic Spotlight Server code must not contain product names, project-specific S
 
 - the host Skill body / `when_to_use` / examples;
 - Client Tool description + schema + safety metadata;
+- consumer Resource Provider search/get/action contracts for large or dynamic entity sets;
 - `uiContext` and conversation context.
 
 The Server may apply **generic** intent families (read/list, named open/view, mutation, clarify) based on Skill/tool metadata, but it must not special-case `skill.<product>`.
@@ -70,10 +72,11 @@ Compatibility has two independent axes:
 - **Core Agentization:** a JS/TS host that can register Client Tools and reach the Server can be `READY`, regardless of visual framework.
 - **UI Adapter:** Vue 3 has the published `@inupedia/spotlight-vue` shell; React/other hosts remain Core-ready but `ADAPTER_REQUIRED` until a compatible shell exists.
 
-Vite is the shipped automatic Tool compiler path. A non-Vite host may require a
-build hook or explicit manifest generation; classify that as
-`BUILD_MIGRATION_REQUIRED`, not as evidence that its business capabilities are
-unsupported.
+Vite is the shipped automatic Tool compiler path. A non-Vite JS/TS host uses
+explicit `defineTool({ name, description, schema, handler })` declarations and
+does not require a build migration solely because it lacks Vite. Classify
+`BUILD_MIGRATION_REQUIRED` only when the host cannot bundle or execute the
+framework-neutral client/runtime contract.
 
 ## State and identity boundary
 
@@ -81,7 +84,21 @@ unsupported.
 - Client Tool results carry a post-action observation so the Server sees the new host state.
 - Conversation/thread memory is separate from optional cross-session memory.
 - Cross-session memory requires a stable authenticated subject id; opaque access tokens disable it rather than becoming identity.
-- Entity catalogs remain consumer data and may be refreshed at runtime without rebuilding the generic Server.
+- Entity catalogs remain consumer data. Register them as Resource Providers so they can be searched and refreshed at runtime without rebuilding the generic Server or expanding the LLM prompt with every entity.
+
+## Tool, Resource and Skill boundary
+
+| Layer             | Owns                                                                          | Does not own                              |
+| ----------------- | ----------------------------------------------------------------------------- | ----------------------------------------- |
+| Tool              | one narrow executable host action                                             | large entity catalogs or workflow policy  |
+| Resource Provider | search/get, aliases, live status and stable-id resolution for one entity type | cross-domain orchestration                |
+| Skill             | when a domain/workflow applies and which Tools are allowed                    | entity truth or duplicated business logic |
+
+Use a Resource Provider when the target set is large, dynamic, status-bearing or
+alias-heavy. A provider exposes deferred `namespace_search` / `namespace_get`
+Tools plus declared resource actions. The action accepts the user's original
+`query`, resolves it to one stable resource id in the browser, rejects ambiguous
+matches, and then calls the existing host capability.
 
 ## Safety defaults
 

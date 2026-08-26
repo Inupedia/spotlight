@@ -26,6 +26,8 @@ export function formatToolFailure(
     PREREQUISITE_FAILED: "前置步骤执行失败",
     PRECONDITION_FAILED: "当前页面状态不满足执行条件",
     TOOL_APPROVAL_REQUIRED: "该操作需要用户明确批准",
+    TOOL_INPUT_INVALID: "工具参数不完整或格式不正确",
+    TOOL_OUTPUT_INVALID: "工具返回结果不符合约定格式",
     TOOL_RUN_FAILED: "工具执行时发生运行错误",
     TOOL_TIMEOUT: "工具执行超时",
   };

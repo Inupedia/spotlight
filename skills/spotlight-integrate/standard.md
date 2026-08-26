@@ -29,12 +29,12 @@ Compatibility is **two-axis**: Core Agentization and visual UI adapter.
 
 ### Core classification
 
-| Status                     | Condition                                                                                         | Action                                                             |
-| -------------------------- | ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `READY`                    | Browser JS/TS host can compile/register framework-neutral Client Tools and reach Spotlight Server | continue core pipeline                                             |
-| `UPGRADE_REQUIRED`         | Core package/build/Node ranges are incompatible                                                   | report exact mismatch; do not force upgrade                        |
-| `BUILD_MIGRATION_REQUIRED` | Current build cannot support the Tool compiler/runtime path without migration                     | analyze capabilities; stop before build migration unless requested |
-| `UNSUPPORTED_AUTOMATION`   | No viable browser Tool integration path exists                                                    | readiness report only                                              |
+| Status                     | Condition                                                                                 | Action                                                             |
+| -------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `READY`                    | Browser JS/TS host can register framework-neutral Client Tools and reach Spotlight Server | continue core pipeline                                             |
+| `UPGRADE_REQUIRED`         | Core package/build/Node ranges are incompatible                                           | report exact mismatch; do not force upgrade                        |
+| `BUILD_MIGRATION_REQUIRED` | Current build cannot support the Tool compiler/runtime path without migration             | analyze capabilities; stop before build migration unless requested |
+| `UNSUPPORTED_AUTOMATION`   | No viable browser Tool integration path exists                                            | readiness report only                                              |
 
 ### UI adapter classification
 
@@ -137,7 +137,7 @@ npm install @inupedia/spotlight-client@<ver> @inupedia/spotlight-protocol@<ver>
 yarn add @inupedia/spotlight-client@<ver> @inupedia/spotlight-protocol@<ver>
 ```
 
-For a Vite host, wire the framework-neutral `spotlightClientTools({ projectId, frontendBuildId, include })` plugin.
+For a Vite host, the framework-neutral `spotlightClientTools({ projectId, frontendBuildId, include })` plugin can infer Tool metadata. Other JS/TS builds register explicit `defineTool` contracts; Vite is not mandatory.
 
 ### Vue visual adapter
 
@@ -165,7 +165,7 @@ Every generated Tool must:
 
 - call an existing host function/export;
 - preserve the host application's authorization checks and backend permission enforcement;
-- have JSDoc immediately above `defineClientTool`;
+- use either JSDoc immediately above `defineClientTool` on the Vite inference path, or explicit `name`, `description` and `schema` through `defineTool`;
 - expose the narrowest input schema needed by the host capability;
 - preserve the actual callable boundary's field names, types, enums, requiredness, and identity semantics unless an explicit adapter performs a documented transform;
 - declare correct `sideEffect`, `replayPolicy`, `riskLevel`, and confirmation requirements supported by the runtime;
@@ -174,7 +174,18 @@ Every generated Tool must:
 
 **Schema fidelity rule:** derive Tool schemas from the actual Store/Service/API/function boundary, not from a convenient benchmark shape. Do not casually widen `Long`/numeric ids to `string | number`, and do not narrow a real host union merely to improve model scoring. If the Tool intentionally adapts the host contract, the adapter must contain the explicit conversion and the generated report/gold set must test the Tool's real adapter contract. Never add generic Server-side coercion just to compensate for an inaccurate Tool schema.
 
-The 0.7.3 Server recursively removes optional `null`/`undefined` values and undeclared object fields when the Tool schema forbids additional properties. This is a model-output boundary, not permission to declare loose or inaccurate schemas. A field that legitimately accepts `null` must declare it with `type: ["string", "null"]`, `anyOf`, or `oneOf`.
+The Server recursively removes optional `null`/`undefined` values and undeclared object fields when the Tool schema forbids additional properties. In 0.9.x the client and Server also validate Tool input at the execution boundary, and the client validates declared output. This is not permission to declare loose or inaccurate schemas. A field that legitimately accepts `null` must declare it with `type: ["string", "null"]`, `anyOf`, or `oneOf`.
+
+### Resource Provider contract
+
+Use `defineResourceProvider` for large or runtime-dynamic target sets such as cameras, assets, tickets, books or BIM components. A provider owns:
+
+- one stable `namespace`;
+- runtime `search`（空 query 表示列出全部）and `get` functions;
+- resource `id`, display `name`, aliases and live status;
+- optional actions that resolve a required user `query` to exactly one resource before executing host behavior.
+
+Do not copy thousands of entity names into Skill text, Tool enums, Server Project Packs or generic router code. Do not trust the LLM to invent stable ids. The Resource Provider is consumer code and may call the host's existing list/status APIs at runtime.
 
 **Behavior fidelity rule:** a user-visible action is not `DIRECT` merely because its final step is an HTTP call. Follow the real behavior through component state, session data, route/query state, validation, chained calls, and all writes. If the UI behavior depends on component-local state or performs multiple/transitive writes, classify it `REFACTOR` (and `GATED` when risk requires it) until the complete behavior is extracted into a stable host capability shared by UI and Agent. Do not fabricate a simplified Tool that skips those invariants.
 

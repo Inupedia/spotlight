@@ -4,13 +4,19 @@ import type {
   SpotlightCommandCatalogVideoChannel,
   SpotlightSkill,
 } from "@inupedia/spotlight-protocol";
-import type { ClientTool, SpotlightClientConfig } from "@inupedia/spotlight-client";
+import type {
+  ClientTool,
+  SpotlightClientConfig,
+  SpotlightResourceProvider,
+} from "@inupedia/spotlight-client";
 import type { SpotlightUiPrompts } from "./remote/meta.js";
 import type { ToolResult } from "./types/toolResult.js";
 
 export type SpotlightConfig = SpotlightClientConfig & {
   /** Browser tools registered with defineClientTool(). */
-  tools: ClientTool[] | (() => ClientTool[]);
+  tools?: ClientTool[] | (() => ClientTool[]);
+  /** Large dynamic business catalogs exposed through generated Resource Tools. */
+  resources?: SpotlightResourceProvider[] | (() => SpotlightResourceProvider[]);
   /** Immutable frontend build identifier used to bind the production manifest. */
   frontendBuildId?: string;
   /** Consumer-owned Skills sent to the server for LangGraph planning. */
@@ -62,13 +68,15 @@ export function defineSpotlightConfig(input: SpotlightConfig): SpotlightConfig {
   if (!config.serverUrl?.trim()) {
     throw new Error("Spotlight config: serverUrl is required");
   }
-  if (!config.tools) {
-    throw new Error("Spotlight config: tools are required");
+  if (!config.tools && !config.resources) {
+    throw new Error("Spotlight config: tools or resources are required");
   }
-  if (typeof config.tools !== "function") {
+  if (config.tools && typeof config.tools !== "function") {
     const tools = config.tools;
     if (!Array.isArray(tools) || tools.length === 0) {
-      throw new Error("Spotlight config: at least one client tool is required");
+      throw new Error(
+        "Spotlight config: tools must not be empty when provided",
+      );
     }
   }
   return config;

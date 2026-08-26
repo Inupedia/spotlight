@@ -21,7 +21,7 @@ export type SkillRouteResult = z.infer<typeof skillRouteSchema>;
 const LIST_QUERY_PATTERN =
   /(?:有哪些|多少|几路|清单|列表|数量|在线状态|覆盖哪些|有几个|list|how many|what .*available)/iu;
 const OPEN_TARGET_VERB_PATTERN =
-  /(?:看看|查看|打开|显示|播放|进入|定位|open|show|view|play|navigate to|go to)/iu;
+  /(?:想看(?:一下)?|看一下|看看|查看|打开|显示|播放|进入|定位|open|show|view|play|navigate to|go to)/iu;
 const OPEN_TOOL_NAME_PATTERN =
   /^(?:open|show|view|play|navigate|select|focus|display|enter|locate)/i;
 const CATALOG_TOOL_DESCRIPTION_PATTERN =
@@ -119,7 +119,7 @@ export function extractOpenTargetName(question: string): string | undefined {
     .trim()
     .replace(/^(请|帮我|给我|please\s+|could you\s+|can you\s+)?/iu, "")
     .replace(
-      /^(看看|查看|打开|显示|播放|进入|定位|open|show|view|play|navigate to|go to)\s*/iu,
+      /^(?:我)?(?:想看(?:一下)?|看一下|看看|查看|打开|显示|播放|进入|定位|open|show|view|play|navigate to|go to)\s*/iu,
       "",
     )
     .trim();
@@ -140,6 +140,9 @@ function buildTargetInput(
   if (!target) return currentInput;
   const key = targetStringInputKey(tool);
   if (!key) return currentInput;
+  if (currentInput?.[key] !== undefined && currentInput[key] !== null) {
+    return currentInput;
+  }
   return { ...(currentInput ?? {}), [key]: target };
 }
 
@@ -255,11 +258,14 @@ export function buildSkillCatalog(
         const tool = registeredTools.get(name)!;
         return {
           name,
+          namespace: tool.namespace,
+          deferLoading: tool.deferLoading,
           description: tool.description,
           sideEffect: tool.sideEffect,
           riskLevel: tool.riskLevel,
           requiresConfirmation: tool.requiresConfirmation,
           inputSchema: tool.inputSchema,
+          resource: tool.resource,
         };
       }),
     capabilityExamples: selectRelevantItems(

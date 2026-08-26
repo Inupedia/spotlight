@@ -6,12 +6,12 @@ Skills tell the **generic Spotlight Server router** which host capabilities appl
 
 Group verified Tools by domain from stage 0.
 
-| Cluster rule | Skill |
-|---|---|
-| same catalog + read/open/update jobs | one `skill.<domain>` |
-| pure navigation across scenes/tabs | `skill.navigate` or a coherent navigation subdomain |
-| filters tightly coupled to one panel/domain | same Skill as that panel |
-| cross-cutting explanation/knowledge | `skill.knowledge` |
+| Cluster rule                                | Skill                                               |
+| ------------------------------------------- | --------------------------------------------------- |
+| same catalog + read/open/update jobs        | one `skill.<domain>`                                |
+| pure navigation across scenes/tabs          | `skill.navigate` or a coherent navigation subdomain |
+| filters tightly coupled to one panel/domain | same Skill as that panel                            |
+| cross-cutting explanation/knowledge         | `skill.knowledge`                                   |
 
 Do not make one Skill per Tool. Do not make one mega-Skill for the whole app.
 
@@ -29,14 +29,14 @@ when_to_use: <user intents and exclusions, not implementation detail>
 allowed-tools: getItemList, openItem, addItem
 spotlight-response-strategy: tool_answer
 capability-examples: <host-grounded examples>
-# 0.7.5+: use this only for an exact, stable consumer contract when sibling
+# Use this only for an exact, stable consumer contract when sibling
 # Skills or Tools can interpret the same wording differently.
 tool-examples: <exact utterance> => <registered Client Tool name>
 ```
 
 `allowed-tools` must exactly match registered Client Tool exports.
 
-`capability-examples` are semantic hints and still go through model routing. `tool-examples` are deterministic consumer contracts: after whitespace and punctuation normalization, an exact match selects the bound registered Tool before model routing. Use them for acceptance-critical phrases and genuinely ambiguous sibling Tools. The Server extracts an explicitly mentioned unique enum value directly; since 0.7.6, any remaining required arguments use structured extraction against that one preselected Tool, so the model cannot switch to a sibling Tool. Missing or invalid input still goes through the normal clarification fence.
+`capability-examples` are semantic hints and still go through model routing. `tool-examples` are deterministic consumer contracts: after whitespace and punctuation normalization, an exact match selects the bound registered Tool before model routing. Use them for acceptance-critical phrases and genuinely ambiguous sibling Tools. The Server extracts an explicitly mentioned unique enum value directly; any remaining required arguments use structured extraction against that one preselected Tool, so the model cannot switch to a sibling Tool. Missing or invalid input still goes through the normal clarification fence.
 
 ## Body: intent-to-tool contract
 
@@ -64,9 +64,14 @@ The router receives Tool descriptions, `sideEffect`, risk metadata, and input sc
 
 Do not depend on a Server patch that recognizes this product by name.
 
-When one Skill exposes both a no-argument catalog/list opener and a targetable open/play Tool, make that distinction explicit in their descriptions. Since 0.7.7, a named-target request that the model assigns to the catalog opener is corrected to the single targetable Tool, with the target copied into its preferred string input. This rule is generic and does not replace project catalog search or ambiguity handling.
+When one Skill exposes both a no-argument catalog/list opener and a targetable open/play Tool, make that distinction explicit in their descriptions. A named-target request that the model assigns to the catalog opener is corrected to the single targetable Tool, with the target copied into its preferred string input. This rule is generic and does not replace Resource search or ambiguity handling.
 
-Since 0.7.8, deployable project packs may also provide server-side named-target catalogs. Exact names and aliases are resolved before semantic Skill routing and produce a stable ID input for the bound Tool. Use this for camera channels or other large, dynamic entity sets: keep the catalog out of the LLM prompt, synchronize it from the system of record, and let the frontend Tool resolve only the returned ID.
+In 0.9.x, large or dynamic named-target catalogs use consumer-side Resource
+Providers, not Server Project Pack catalogs. The Resource Provider owns search,
+aliases, status and stable-id resolution. Skills should name the generated
+`<namespace>_search`, `<namespace>_get` and action Tools as dependencies, explain
+the workflow, and require the action's `query` to preserve the user's original
+target wording. Do not enumerate the catalog in Skill text.
 
 ## Knowledge Skill
 

@@ -4,13 +4,22 @@ export {
   createClientToolManifest,
   createClientToolRegistry,
   defineClientTool,
+  defineTool,
   getClientToolDescriptor,
   type ClientTool,
   type ClientToolHandler,
   type ClientToolOptions,
   type ClientToolSchemaOverride,
   type GeneratedClientToolMeta,
+  type DefineToolOptions,
+  SpotlightToolValidationError,
 } from "./clientTool.js";
+export {
+  defineResourceProvider,
+  type SpotlightResourceAction,
+  type SpotlightResourceProvider,
+  type SpotlightResourceProviderOptions,
+} from "./resourceProvider.js";
 export {
   appendProjectQuery,
   buildJsonHeaders,
@@ -44,3 +53,11 @@ export {
   type SkillScriptRunResult,
 } from "./skillScriptPath.js";
 export * from "./appClient.js";
+export type {
+  SpotlightResourceRef,
+  SpotlightResourceSearchInput,
+  SpotlightResourceSearchResult,
+  SpotlightResourceStatus,
+  SpotlightToolResultEnvelope,
+  SpotlightContentItem,
+} from "@inupedia/spotlight-protocol";

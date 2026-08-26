@@ -3,6 +3,7 @@ import type {
   FrontendToolDescriptorV1,
   ToolTraceEvent,
 } from "@inupedia/spotlight-protocol";
+import { validateJsonSchemaValue } from "@inupedia/spotlight-protocol";
 import { z } from "zod";
 import type { BaseStore } from "@langchain/langgraph";
 import type {
@@ -155,6 +156,14 @@ export function createClientLangChainTool(
   return tool(
     async (input: Record<string, unknown>) => {
       if (completedOutput !== undefined) return completedOutput;
+      const validation = validateJsonSchemaValue(input, descriptor.inputSchema);
+      if (!validation.valid) {
+        throw new Error(
+          `TOOL_INPUT_INVALID: ${descriptor.name}: ${validation.issues
+            .map((issue) => `${issue.path} ${issue.message}`)
+            .join("; ")}`,
+        );
+      }
       const call: SpotlightToolCallInfo = {
         id: crypto.randomUUID(),
         name: descriptor.name,

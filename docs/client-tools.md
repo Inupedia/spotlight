@@ -2,39 +2,50 @@
 
 ## 你最终需要写多少代码
 
-业务项目只负责定义“当前页面能做什么”。以另一个视频项目为例：
+业务项目只负责定义“当前页面能做什么”和“动态资源从哪里查”。以另一个视频项目为例：
 
 ```ts
 // src/spotlight/tools.ts
-import { defineClientTool } from "@inupedia/spotlight-client";
+import {
+  defineClientTool,
+  defineResourceProvider,
+} from "@inupedia/spotlight-client";
 import { videoService } from "@/service/video";
 
-/** 按名称全屏播放指定视频。 */
-export const playVideoFullscreen = defineClientTool(
-  async ({ name }: { name: string }): Promise<void> => {
-    await videoService.playFullscreen(name);
+export const videoResources = defineResourceProvider({
+  namespace: "video",
+  description: "视频监控通道",
+  search: ({ query, limit }) => videoService.search(query, limit),
+  get: (id) => videoService.getById(id),
+  actions: {
+    playFullscreen: {
+      toolName: "playVideoFullscreen",
+      description: "按名称、别名或稳定 ID 全屏播放视频。",
+      handler: (video) => videoService.playFullscreenById(video.id),
+    },
   },
-);
+});
 
 /** 关闭视频播放界面。 */
 export const closeVideo = defineClientTool(async (): Promise<void> => {
   await videoService.close();
 });
 
-export const spotlightTools = [playVideoFullscreen, closeVideo];
+export const spotlightTools = [closeVideo];
 ```
 
 这里没有 LangChain、Host、Capability Registry、工作流协议或 Tool 元数据对象：
 
-- Tool 名称来自导出变量名，如 `playVideoFullscreen`。
+- 普通 Tool 名称来自导出变量名；Resource action 可声明稳定 Tool 名称，如 `playVideoFullscreen`。
 - Tool 说明来自函数上方的 JSDoc。
 - 输入、输出 JSON Schema 来自 TypeScript 类型。
 - 函数仍然直接调用项目已有的 Store、Router、播放器或 GIS Service。
+- Resource Provider 统一管理动态名称、别名、在线状态和稳定 ID；一万个摄像头也不需要写一万个 Tool 或塞进提示词。
 
 ## 1. 安装
 
 ```bash
-pnpm add @inupedia/spotlight-client@^0.7.1 @inupedia/spotlight-vue@^0.7.1
+pnpm add @inupedia/spotlight-client@0.8.0 @inupedia/spotlight-protocol@0.8.0 @inupedia/spotlight-vue@0.8.0
 ```
 
 ## 2. 配置 Vite
@@ -71,7 +82,7 @@ import {
   defineSpotlightConfig,
   readSpotlightEnv,
 } from "@inupedia/spotlight-vue";
-import { spotlightTools } from "./tools";
+import { spotlightTools, videoResources } from "./tools";
 
 export default defineSpotlightConfig({
   ...readSpotlightEnv(import.meta.env, {
@@ -79,6 +90,7 @@ export default defineSpotlightConfig({
   }),
   frontendBuildId: import.meta.env.VITE_BUILD_SHA,
   tools: spotlightTools,
+  resources: [videoResources],
   // 登录系统有稳定用户 ID 时再配置；不要使用会轮换的 token。
   getMemorySubjectId: () => authStore.userId,
 });
@@ -91,12 +103,13 @@ import { SpotlightVue } from "@inupedia/spotlight-vue";
 import App from "./App.vue";
 import spotlightConfig from "./spotlight/config";
 
-createApp(App)
-  .use(SpotlightVue, spotlightConfig)
-  .mount("#app");
+createApp(App).use(SpotlightVue, spotlightConfig).mount("#app");
 ```
 
 到这里，单步操作项目的接入工作已经结束。
+
+非 Vite 项目使用显式 `defineTool({ name, description, schema, handler })`；
+Vite 插件只负责自动推导，不是 SDK 的运行前提。
 
 ## 4. 可选：注册业务 Skill
 
@@ -104,25 +117,24 @@ Tool 说明“页面能做什么”，Skill 说明“什么时候用、多个 To
 
 ```md
 <!-- .inupedia/skills/skill.monitoring/SKILL.md -->
+
 ---
+
 id: skill.monitoring
 name: 现场监控
 description: 打开、播放或关闭项目视频监控。
 when_to_use: 用户点名监控点位要求播放，或要求打开、关闭监控界面。
 capability-examples: 打开监控列表, 播放钢筋棚监控, 关闭监控
 interface:
-  display_name: 现场监控
-  brand_color: "#1677ff"
+display_name: 现场监控
+brand_color: "#1677ff"
 dependencies:
-  tools:
-    - type: browser
-      value: openVideoMonitoring
-    - type: browser
-      value: playVideoFullscreen
-    - type: browser
-      value: closeVideo
+tools: - type: browser
+value: openVideoMonitoring - type: browser
+value: playVideoFullscreen - type: browser
+value: closeVideo
 policy:
-  allow_implicit_invocation: true
+allow_implicit_invocation: true
 ---
 
 # 现场监控
@@ -204,13 +216,13 @@ export const switchVideoGroup = defineClientTool(
 
 ## 哪些功能应该放在哪里
 
-| 功能 | 位置 | 例子 |
-| --- | --- | --- |
-| 页面专属动作 | Client Tool | 打开视频、切换图层、进入隧洞、选中构件 |
-| 通用外部能力 | Server LangChain Tool | 联网搜索、知识检索、数据库、MCP、第三方 API |
-| 项目业务流程说明 | 前端注册的 Skill | 进入巡检视图后开始巡检、按名称播放监控 |
-| 通用编排与安全门禁 | Server LangGraph | 选择 Skill、约束 Tool、等待浏览器执行结果 |
-| 页面状态 | `getUiContext` | 当前路由、选中对象、打开的面板 |
+| 功能               | 位置                  | 例子                                        |
+| ------------------ | --------------------- | ------------------------------------------- |
+| 页面专属动作       | Client Tool           | 打开视频、切换图层、进入隧洞、选中构件      |
+| 通用外部能力       | Server LangChain Tool | 联网搜索、知识检索、数据库、MCP、第三方 API |
+| 项目业务流程说明   | 前端注册的 Skill      | 进入巡检视图后开始巡检、按名称播放监控      |
+| 通用编排与安全门禁 | Server LangGraph      | 选择 Skill、约束 Tool、等待浏览器执行结果   |
+| 页面状态           | `getUiContext`        | 当前路由、选中对象、打开的面板              |
 
 不要把 GIS、视频播放器或项目 Store 搬到 Server。Server 只知道 Tool 契约，具体页面动作仍由浏览器执行。
 
@@ -225,6 +237,15 @@ dist/spotlight-client-manifest.json
 浏览器初始化时提交构建清单，Server 返回已接受的 Manifest Digest 和 Tool / Skill 状态；每个 Turn 继续绑定同一份清单。Server 只把经过意图门禁筛选的副作用 Tool 暴露给 Action Agent，Knowledge Agent 永远看不到 Client Tool；浏览器端仍会再次检查 Tool 是否由当前构建真实注册。因此不再需要 `SPOTLIGHT_CLIENT_MANIFEST_DIR`，也不会因为容器缺少该目录而启动失败。
 
 Server 读取可信清单后，将 Client Tool 转为真正的 LangChain Tool。模型调用该 Tool 时，执行请求通过现有浏览器 RPC 回到对应页面。LangChain 和 LangGraph 因此属于 Server 实现细节，不增加业务项目的接入成本。
+
+## 从 0.7.x 迁移到 0.9.x
+
+1. 将使用到的 `@inupedia/spotlight-*` 包统一升级到 `0.8.0`，不要混装 `link:`、本地构建和 Registry 包。
+2. 小型固定动作继续使用 `defineClientTool`；非 Vite 宿主可改用显式 `defineTool`，无需迁移构建系统。
+3. 摄像头、资产、工单、BIM 构件等大型/动态目录迁移为 `defineResourceProvider`，删除 Server named-target catalog 和重复的前端别名解析。
+4. 在 Spotlight 配置中注册 `resources`；Skill 只保留业务流程和 generated Tool dependencies，不枚举实体目录。
+5. Tool input/output 会按声明的 JSON Schema 在运行边界校验；修正不诚实的旧 Schema，不要依赖模型碰巧给对参数。
+6. Tool 返回值会标准化为 Tool Result envelope，UI 仍从稳定 Turn/Item 事件展示 Skill、Tool、参数和结果。
 
 ## 从 0.6.x 迁移到 0.7.x
 

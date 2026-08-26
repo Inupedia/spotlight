@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-client",
-  "version": "0.7.8",
+  "version": "0.8.0",
   "description": "Build-described browser Client Tools and HTTP helpers for Inupedia Spotlight",
   "type": "module",
   "license": "MIT",

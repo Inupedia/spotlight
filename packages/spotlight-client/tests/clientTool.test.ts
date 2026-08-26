@@ -3,6 +3,7 @@ import {
   createClientToolManifest,
   createClientToolRegistry,
   defineClientTool,
+  defineTool,
 } from "../src/clientTool.js";
 
 const schema = {
@@ -12,7 +13,7 @@ const schema = {
     required: ["videoId"],
     additionalProperties: false,
   },
-  output: { type: "null" },
+  output: { type: "string" },
 };
 
 describe("client tools", () => {
@@ -27,9 +28,23 @@ describe("client tools", () => {
     );
     const registry = createClientToolRegistry([openVideo]);
     expect(registry.descriptors[0]?.name).toBe("openVideo");
-    await expect(registry.execute("openVideo", { videoId: "camera-1" })).resolves.toBe(
-      "opened:camera-1",
-    );
+    await expect(
+      registry.execute("openVideo", { videoId: "camera-1" }),
+    ).resolves.toBe("opened:camera-1");
+  });
+
+  it("defines a Tool without Vite build transformation", async () => {
+    const tool = defineTool({
+      name: "openVideoExplicit",
+      description: "Open a video without build-time metadata",
+      schema,
+      handler: async ({ videoId }: { videoId: string }) => videoId,
+    });
+    await expect(
+      createClientToolRegistry([tool]).execute("openVideoExplicit", {
+        videoId: "v13",
+      }),
+    ).resolves.toBe("v13");
   });
 
   it("derives a tier from the legacy descriptor fields", () => {

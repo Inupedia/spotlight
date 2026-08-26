@@ -14,12 +14,17 @@ import {
   type SpotlightConfig,
   type SpotlightVuePluginOptions,
 } from "./config.js";
-import { mountSpotlightShell, unmountSpotlightShellForTests } from "./mountShell.js";
+import {
+  mountSpotlightShell,
+  unmountSpotlightShellForTests,
+} from "./mountShell.js";
 import type { SpotlightAvatarConfig } from "./avatar/config.js";
 
 export const SPOTLIGHT_HTTP_KEY: InjectionKey<SpotlightHttp> =
   Symbol("spotlight-http");
-export type SpotlightClientToolRegistry = ReturnType<typeof createClientToolRegistry>;
+export type SpotlightClientToolRegistry = ReturnType<
+  typeof createClientToolRegistry
+>;
 export const SPOTLIGHT_CLIENT_TOOLS_KEY: InjectionKey<SpotlightClientToolRegistry> =
   Symbol("spotlight-client-tools");
 export const SPOTLIGHT_APP_CLIENT_KEY: InjectionKey<SpotlightAppClient> =
@@ -50,7 +55,15 @@ export function getSpotlightHttp(): SpotlightHttp {
 export function getSpotlightClientTools(): SpotlightClientToolRegistry {
   if (!installedClientTools) {
     const config = getSpotlightConfig();
-    const tools = typeof config.tools === "function" ? config.tools() : config.tools;
+    const tools = [
+      ...(typeof config.tools === "function"
+        ? config.tools()
+        : (config.tools ?? [])),
+      ...(typeof config.resources === "function"
+        ? config.resources()
+        : (config.resources ?? [])
+      ).flatMap((resource) => resource.tools),
+    ];
     installedClientTools = createClientToolRegistry(tools as ClientTool[]);
   }
   return installedClientTools;
@@ -80,8 +93,18 @@ export const SpotlightVue = {
     const config = defineSpotlightConfig(
       "config" in options && options.config ? options.config : options,
     );
-    const resolvedTools =
-      typeof config.tools === "function" ? config.tools() : config.tools;
+    const directTools =
+      typeof config.tools === "function"
+        ? config.tools()
+        : (config.tools ?? []);
+    const resolvedResources =
+      typeof config.resources === "function"
+        ? config.resources()
+        : (config.resources ?? []);
+    const resolvedTools = [
+      ...directTools,
+      ...resolvedResources.flatMap((resource) => resource.tools),
+    ];
     if (!Array.isArray(resolvedTools) || resolvedTools.length === 0) {
       throw new Error(
         "Spotlight config: at least one client tool is required after tools() resolves",
@@ -98,18 +121,27 @@ export const SpotlightVue = {
       clientInfo: {
         name: "spotlight-vue",
         title: "Spotlight Vue",
-        version: "0.7.1",
+        version: "0.8.0",
       },
-      toolManifest: () => createClientToolManifest({
-        projectId: config.projectId,
-        frontendBuildId,
-        tools: resolvedTools,
-      }),
+      toolManifest: () =>
+        createClientToolManifest({
+          projectId: config.projectId,
+          frontendBuildId,
+          tools: resolvedTools,
+        }),
       skills: () => {
-        const skills = config.getSkillsForRun?.()
-          ?? (typeof config.skills === "function" ? config.skills() : config.skills)
-          ?? [];
-        return skills;
+        const skills =
+          config.getSkillsForRun?.() ??
+          (typeof config.skills === "function"
+            ? config.skills()
+            : config.skills) ??
+          [];
+        return [
+          ...skills,
+          ...resolvedResources.flatMap((resource) =>
+            resource.skill ? [resource.skill] : [],
+          ),
+        ];
       },
     });
 

@@ -11,8 +11,8 @@ Run from the host app root. The agent must actually inspect/grep the generated f
 rg -n '^export const ' src/spotlight/tools.ts
 rg -n 'allowed-tools:' .inupedia/skills --glob '**/SKILL.md'
 
-# B. Vite include path exists
-rg -n 'spotlightClientTools|include:' vite.config.* 2>/dev/null
+# B. Tool registration path exists (automatic Vite compiler or explicit contracts)
+rg -n 'spotlightClientTools|defineClientTool|defineTool|defineResourceProvider' vite.config.* src 2>/dev/null
 
 # C. projectId alignment
 rg -n 'projectId' vite.config.* src/spotlight/config.ts spotlight-project/spotlight.project.yml
@@ -28,8 +28,10 @@ Fail static acceptance if:
 
 - a Skill lists a tool not exported/registered;
 - `skill.knowledge` is missing;
-- JSDoc is missing above any `defineClientTool`;
+- JSDoc is missing above any Vite-inferred `defineClientTool`, or an explicit `defineTool` lacks name/description/schema;
+- a Resource action can execute an ambiguous/missing entity or bypass stable-id resolution;
 - projectId differs across host wiring/project pack/env;
+- build manifest Tool names/count differ from the runtime Tool + Resource registry;
 - a generated Tool does not call a verified host capability;
 - a `GATED` capability was auto-exposed without explicit approval;
 - compatibility blockers were hidden with forced package installation.
@@ -71,9 +73,9 @@ Never invent a named target for a gold prompt.
 
 If real entity names exist in source-controlled JSON/config/fixtures, use exact strings from the host repo.
 
-### Dynamic catalog
+### Dynamic catalog / Resource Provider
 
-If entities exist only at runtime (database-backed CRM records, books, tickets, assets, projects, users, etc.), use the host's verified list/search/read capability to capture a real target before the live benchmark.
+If entities exist only at runtime (database-backed CRM records, cameras, books, tickets, assets, projects, users, etc.), expose the verified list/search/read boundary through `defineResourceProvider`, then capture a real target before the live benchmark.
 
 Write `.spotlight-integrate/runtime-fixtures.json`:
 
@@ -146,10 +148,15 @@ Then run every gold prompt through the same runtime/model configuration intended
 
 For mutations/navigation, validate the **host state/UI delta**, not only the model's chosen tool name.
 
-Also verify the actual 0.7.x lifecycle: initialize succeeds, the thread is reusable,
+Also verify the actual 0.9.x lifecycle: initialize succeeds, the thread is reusable,
 SSE sequence numbers are monotonic/resumable, host Tool correlation ids are
 acknowledged once, Tool trace is visible, and the post-action UI context reflects
 the expected state.
+
+For every Resource Provider, test exact id, exact name, alias, fuzzy search,
+ambiguous query, missing query, live status refresh and action execution by stable
+id. At least one fixture should exceed the small static-list case so acceptance
+does not accidentally depend on putting the entire catalog in the model prompt.
 
 ## 7. Metrics
 
