@@ -280,7 +280,29 @@ export function memoryNamespace(
   projectId: string,
   subjectId: string,
 ): string[] {
-  return [projectId, "subjects", subjectId];
+  return [
+    langGraphNamespaceLabel(projectId),
+    "subjects",
+    langGraphNamespaceLabel(subjectId),
+  ];
+}
+
+const ESCAPED_NAMESPACE_PREFIX = "x_";
+
+/**
+ * LangGraph Store rejects namespace labels containing periods. Preserve the
+ * existing namespace for ordinary labels, but deterministically escape labels
+ * that would be rejected. Labels beginning with the escape prefix are encoded
+ * as well, keeping the mapping injective and preventing cross-subject aliases.
+ */
+function langGraphNamespaceLabel(label: string): string {
+  if (
+    !label.includes(".") &&
+    !label.startsWith(ESCAPED_NAMESPACE_PREFIX)
+  ) {
+    return label;
+  }
+  return `${ESCAPED_NAMESPACE_PREFIX}${Buffer.from(label, "utf8").toString("base64url")}`;
 }
 
 export function createLongTermMemoryTools(
