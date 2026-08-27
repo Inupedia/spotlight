@@ -843,6 +843,58 @@ describe("LangGraph runtime isolation", () => {
     expect(phases).not.toContain("knowledge_agent_start");
   });
 
+  it("does not invent personal memory when the long-term store is empty", async () => {
+    const subjectId = "user-memory-empty";
+    let searches = 0;
+    let routerCalls = 0;
+    const phases: Array<{ phase: string; summary: string }> = [];
+    const runContext = context("你还记得我的回答风格偏好吗？", [], {
+      memorySubjectId: subjectId,
+    });
+    runContext.project = {
+      ...runContext.project,
+      knowledgeProvider: {
+        id: "knowledge",
+        async search() {
+          searches += 1;
+          return [];
+        },
+      },
+      webSearchProvider: {
+        id: "web",
+        async search() {
+          searches += 1;
+          return [];
+        },
+      },
+    };
+
+    const result = await runSpotlightGraph(runContext, {
+      model: new FakeToolCallingModel(),
+      router: {
+        async route() {
+          routerCalls += 1;
+          throw new Error("personal-memory inspection must bypass the router");
+        },
+      },
+      checkpointer: new MemorySaver(),
+      store: new InMemoryStore(),
+      onPhase: (phase, summary) => phases.push({ phase, summary }),
+    });
+
+    expect(result.assistantReply).toBe("我没有找到您明确授权保存的长期记忆。");
+    expect(routerCalls).toBe(0);
+    expect(searches).toBe(0);
+    expect(phases).toContainEqual({
+      phase: "knowledge_agent_done",
+      summary:
+        "个人长期记忆中没有可用于回答的内容；未调用模型、知识库、联网搜索或页面 Tool。",
+    });
+    expect(phases.map(({ phase }) => phase)).not.toContain(
+      "knowledge_agent_start",
+    );
+  });
+
   it("does not mutate long-term memory during an ordinary knowledge turn", async () => {
     const store = new InMemoryStore();
     const subjectId = "user-ordinary";

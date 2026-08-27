@@ -159,6 +159,11 @@ When long-term memory is enabled, additionally verify that an authenticated stab
 turn does not write memory, a recall question such as “你记得我上次说过什么吗”
 does not mutate memory, and recalled memory is shown as context while the current
 route/Knowledge/Tool path still executes.
+After forgetting the preference, repeat the recall question and require a
+deterministic “no user-approved memory found” answer with no model, Knowledge,
+web-search, or client-Tool call. A missing `memory_recall` event alone is not
+enough: the final answer must not present project defaults as remembered user
+preferences.
 
 For every Resource Provider, test exact id, exact name, alias, fuzzy search,
 ambiguous query, missing query, live status refresh and action execution by stable

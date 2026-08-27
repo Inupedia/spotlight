@@ -524,6 +524,23 @@ export function compileSpotlightWorkflow(
         return { ...assistantUpdate(reply), invokedClientTools: [] };
       }
       const memoryReadEnabled = isMemoryReadEnabled(context.request);
+      if (
+        isPersonalMemoryInspection(state.question) &&
+        !state.memoryContext.trim()
+      ) {
+        const reply = !namespace
+          ? "当前没有可识别的稳定用户身份，因此无法读取跨会话长期记忆。"
+          : !memoryReadEnabled
+            ? "本轮已关闭长期记忆读取，因此我没有读取您的个人记忆。"
+            : "我没有找到您明确授权保存的长期记忆。";
+        emitPhase(
+          config,
+          options,
+          "knowledge_agent_done",
+          "个人长期记忆中没有可用于回答的内容；未调用模型、知识库、联网搜索或页面 Tool。",
+        );
+        return { ...assistantUpdate(reply), invokedClientTools: [] };
+      }
       const evidence = state.evidenceBundle ?? emptyEvidenceBundle();
       const result = await options.model.invoke(
         buildKnowledgeSynthesizeMessages({
