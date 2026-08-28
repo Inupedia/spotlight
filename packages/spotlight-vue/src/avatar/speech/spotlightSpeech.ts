@@ -40,6 +40,11 @@ async function blobToBase64(blob: Blob): Promise<string> {
 }
 
 function assertBrowserSupport(): void {
+  if (typeof window !== "undefined" && window.isSecureContext === false) {
+    throw new Error(
+      "语音输入需要 HTTPS 或 localhost 安全环境，当前页面无法访问麦克风。",
+    );
+  }
   if (!navigator.mediaDevices?.getUserMedia) {
     throw new Error("当前浏览器不支持麦克风采集。");
   }

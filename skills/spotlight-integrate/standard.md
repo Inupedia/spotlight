@@ -157,6 +157,32 @@ Vue visual wiring:
 3. `main.*`: Spotlight CSS + `app.use(SpotlightVue, { config, enabled: true })`
 4. Dev proxy: frontend `VITE_SPOTLIGHT_SERVER_URL` -> Spotlight Server `:8787`
 
+Optional Little Drop voice surface stays in the UI adapter, not in host Tools or
+Skills. Enable it only when the host ships the configured Spine assets:
+
+```ts
+app.use(SpotlightVue, {
+  ...spotlightConfig,
+  enabled: true,
+  avatarEnabled: true,
+  avatar: {
+    initiallyVisible: true,
+    assetBaseUrl: projectConfig.deploy.basePath,
+    skeletonJson: "little-drop/export/shuidi.json",
+    greetingText: "您好，我是 Spotlight 助手",
+  },
+});
+```
+
+The resulting path is `microphone -> STT -> existing Spotlight turn -> final
+answer -> TTS`; never create a voice-only Agent/query loop. The visible avatar
+offers click-to-record/click-to-send, while the command panel keeps the keyboard
+voice shortcut. Production microphone access requires HTTPS (localhost is the
+development exception).
+For a host deployed below `/`, set `assetBaseUrl` from the host's existing public
+base-path source of truth; a library build cannot reliably infer the consumer's
+deployment prefix.
+
 For React/other frameworks with `ui adapter = ADAPTER_REQUIRED`, do **not** install `@inupedia/spotlight-vue`. Continue Client Tool/Skill/Server wiring and headless live benchmarks. Report visual embedding as remaining adapter work.
 
 ## 6. Client Tool contract
@@ -215,6 +241,15 @@ SPOTLIGHT_LLM_PROVIDER=siliconflow
 SILICONFLOW_API_KEY=
 SILICONFLOW_API_BASE=https://api.siliconflow.cn/v1
 SILICONFLOW_MODEL=
+# Optional Little Drop voice I/O. Uses the same server-side SiliconFlow key.
+SILICONFLOW_STT_MODEL=TeleAI/TeleSpeechASR
+SILICONFLOW_STT_TIMEOUT_MS=30000
+SILICONFLOW_TTS_MODEL=FunAudioLLM/CosyVoice2-0.5B
+SILICONFLOW_TTS_VOICE=fishaudio/fish-speech-1.4:diana
+SILICONFLOW_TTS_RESPONSE_FORMAT=mp3
+SILICONFLOW_TTS_SPEED=1.2
+SILICONFLOW_TTS_GAIN=0
+SILICONFLOW_TTS_TIMEOUT_MS=45000
 KNOWLEDGE_BASE_URL=
 KNOWLEDGE_API_KEY=
 KNOWLEDGE_TIMEOUT_MS=120000

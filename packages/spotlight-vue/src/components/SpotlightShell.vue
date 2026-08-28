@@ -11,11 +11,18 @@
     :on-keyup="onSpotlightKeyup"
     @visible-change="onPanelVisibleChange"
   />
-  <Live2dPanel v-if="avatarEnabled && live2dVisible" />
+  <Live2dPanel
+    v-if="avatarEnabled && live2dVisible"
+    :voice-disabled="store.loading || speechPending || voiceStarting"
+    :voice-error="store.error"
+    @voice-start="startLive2dVoiceRecording"
+    @voice-stop="stopLive2dVoiceRecording"
+    @close="live2dOverlay.hide"
+  />
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import {
   buildFastLive2dBriefing,
   summarizeLive2dBriefing,
@@ -64,6 +71,7 @@ const VOICE_INPUT_KEY_LABEL = "`";
 const voiceHoldTimer = ref<number | null>(null);
 const voiceHoldActive = ref(false);
 const speechPending = ref(false);
+const voiceStarting = ref(false);
 const speechAbortController = ref<AbortController | null>(null);
 const ttsAudio = ref<HTMLAudioElement | null>(null);
 const ttsAudioUrl = ref<string | null>(null);
@@ -124,6 +132,7 @@ function cancelSpeechSession() {
     speechAbortController.value = null;
   }
   speechPending.value = false;
+  voiceStarting.value = false;
   voiceHoldActive.value = false;
   sttFromLive2dVoiceChannel.value = false;
   live2dVoiceChannel.reset();
@@ -427,6 +436,7 @@ function canLive2dHiddenVoiceStt(): boolean {
     live2dVisible.value &&
     !store.visible &&
     !store.loading &&
+    !voiceStarting.value &&
     !speechPending.value
   );
 }
@@ -500,6 +510,36 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
       live2dVoiceChannel.reset();
     }
   }, 450);
+}
+
+async function startLive2dVoiceRecording(): Promise<void> {
+  if (!canLive2dHiddenVoiceStt() || voiceStarting.value) return;
+  voiceStarting.value = true;
+  try {
+    stopTtsPlayback();
+    await speechService.startRecording();
+    if (!live2dVisible.value) {
+      speechService.cancel();
+      return;
+    }
+    voiceHoldActive.value = true;
+    sttFromLive2dVoiceChannel.value = true;
+    live2dVoiceChannel.setRecording(true);
+    store.error = "";
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "无法启动语音录制。";
+    store.error = message;
+    voiceHoldActive.value = false;
+    sttFromLive2dVoiceChannel.value = false;
+    live2dVoiceChannel.reset();
+  } finally {
+    voiceStarting.value = false;
+  }
+}
+
+function stopLive2dVoiceRecording(): void {
+  if (!voiceHoldActive.value) return;
+  void stopSpeechAndFillPrompt();
 }
 
 function onSpotlightKeyup(event: KeyboardEvent) {
@@ -602,6 +642,12 @@ watch(
     });
   },
 );
+
+onMounted(() => {
+  if (props.avatarEnabled && avatarConfig.initiallyVisible) {
+    live2dOverlay.show();
+  }
+});
 
 onUnmounted(() => {
   cancelSpeechSession();

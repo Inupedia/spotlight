@@ -1,4 +1,5 @@
 export * from "./contracts.js";
+export * from "./audio.js";
 export * from "./durableState.js";
 export * from "./policy.js";
 export * from "./providerRegistry.js";

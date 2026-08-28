@@ -26,6 +26,13 @@ import {
   assertRegisterableClientTools,
   UnsupportedToolTierError,
 } from "./safety.js";
+import {
+  SpotlightAudioError,
+  synthesizeSpotlightSpeech,
+  transcribeSpotlightAudio,
+  type SpotlightSpeechInput,
+  type SpotlightTranscriptionInput,
+} from "./audio.js";
 
 export const SPOTLIGHT_SERVER_VERSION = (
   JSON.parse(
@@ -128,7 +135,7 @@ function resumeCursor(
 }
 
 export async function buildServer(options: BuildServerOptions) {
-  const app = Fastify({ logger: true, bodyLimit: 1024 * 1024 });
+  const app = Fastify({ logger: true, bodyLimit: 12 * 1024 * 1024 });
   const durableState = options.durableState ?? new SpotlightDurableState();
   await app.register(cors, {
     origin: options.corsOrigin ?? "*",
@@ -188,7 +195,46 @@ export async function buildServer(options: BuildServerOptions) {
       webSearch: options.runManager.providerIds().webSearch,
     },
     serverTools: options.runManager.listServerToolNames(),
+    audio: {
+      provider: "siliconflow",
+      configured: Boolean(process.env.SILICONFLOW_API_KEY?.trim()),
+      sttModel: process.env.SILICONFLOW_STT_MODEL?.trim() || "TeleAI/TeleSpeechASR",
+      ttsModel: process.env.SILICONFLOW_TTS_MODEL?.trim() || "FunAudioLLM/CosyVoice2-0.5B",
+    },
   }));
+
+  app.post<{ Body: SpotlightTranscriptionInput }>(
+    "/v1/audio/transcriptions",
+    async (request, reply) => {
+      try {
+        return await transcribeSpotlightAudio(request.body, process.env, request.signal);
+      } catch (error) {
+        if (error instanceof SpotlightAudioError) {
+          return reply.status(error.statusCode).send({
+            error: { code: error.code, message: error.message },
+          });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post<{ Body: SpotlightSpeechInput }>(
+    "/v1/audio/speech",
+    async (request, reply) => {
+      try {
+        const audio = await synthesizeSpotlightSpeech(request.body, process.env, request.signal);
+        return reply.header("Content-Type", audio.contentType).send(audio.buffer);
+      } catch (error) {
+        if (error instanceof SpotlightAudioError) {
+          return reply.status(error.statusCode).send({
+            error: { code: error.code, message: error.message },
+          });
+        }
+        throw error;
+      }
+    },
+  );
 
   app.post<{ Body: SpotlightInitializeRequest }>(
     "/v1/initialize",

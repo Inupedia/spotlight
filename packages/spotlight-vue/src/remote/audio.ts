@@ -15,6 +15,7 @@ export function normalizeSpeakText(input: string): string {
     .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
     .replace(/[#>*_-]+/g, " ")
     .replace(/\s+/g, " ")
+    .replace(/\s+([，。！？、；：,.!?;:])/g, "$1")
     .trim()
     .slice(0, 3000);
 }

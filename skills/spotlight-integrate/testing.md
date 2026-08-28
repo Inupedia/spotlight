@@ -165,6 +165,15 @@ web-search, or client-Tool call. A missing `memory_recall` event alone is not
 enough: the final answer must not present project defaults as remembered user
 preferences.
 
+When Little Drop voice I/O is enabled, also verify the same question through the
+visible click-to-record control: microphone permission succeeds on HTTPS/localhost,
+`POST /v1/audio/transcriptions` returns non-empty text, that text starts the normal
+Spotlight lifecycle, and the final answer produces non-empty audio from
+`POST /v1/audio/speech`. Confirm that the text and voice paths choose the same
+Skill/Tool and cause the same host state delta. An HTTP production page, a mock
+transcription, or a successful audio endpoint without an Agent turn is not an
+end-to-end voice pass.
+
 For every Resource Provider, test exact id, exact name, alias, fuzzy search,
 ambiguous query, missing query, live status refresh and action execution by stable
 id. At least one fixture should exceed the small static-list case so acceptance

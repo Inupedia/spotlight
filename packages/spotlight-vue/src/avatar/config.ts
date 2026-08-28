@@ -1,6 +1,8 @@
 import { inject, type InjectionKey } from "vue";
 
 export type SpotlightAvatarConfig = {
+  /** Show the digital-human voice surface as soon as Spotlight mounts. */
+  initiallyVisible?: boolean;
   /** Base URL for Spine assets (defaults to `import.meta.env.BASE_URL`). */
   assetBaseUrl?: string;
   /** Skeleton JSON path relative to asset base (default: `little-drop/export/shuidi.json`). */
