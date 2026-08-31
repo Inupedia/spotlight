@@ -19,17 +19,21 @@
     @voice-stop="stopLive2dVoiceRecording"
     @close="live2dOverlay.hide"
   />
+  <button
+    v-else-if="avatarEnabled"
+    type="button"
+    class="spotlight-avatar-reopen"
+    aria-label="再次打开数字人小滴"
+    title="再次打开小滴（Ctrl/Command + L）"
+    @click="showLive2dAvatar"
+  >
+    <span class="spotlight-avatar-reopen__drop" aria-hidden="true" />
+    <span class="spotlight-avatar-reopen__label">小滴</span>
+  </button>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import {
-  buildFastLive2dBriefing,
-  summarizeLive2dBriefing,
-  type Live2dBriefingSentence,
-} from "../avatar/speech/live2dBriefingSummarizer.js";
-import { isGenericHostExecutionReply } from "../avatar/speech/live2dAnswerSpeechPolicy.js";
-import { LIVE2D_ANSWER_STEP_ID } from "../avatar/speech/live2dStreamSpeech.js";
 import { waitForAudioNaturalEnd } from "../avatar/speech/live2dTtsPlayback.js";
 import type { WavEnvelope } from "../avatar/spine/live2dApp.js";
 import {
@@ -77,7 +81,6 @@ const ttsAudio = ref<HTMLAudioElement | null>(null);
 const ttsAudioUrl = ref<string | null>(null);
 const ttsAbortController = ref<AbortController | null>(null);
 const activeSpeechToken = ref(0);
-const lastSpokenPipelineRunId = ref(0);
 const live2dHoldThinkingUntilSpeech = ref(false);
 const live2dBriefingKeepLastMs = computed(() =>
   Math.max(
@@ -88,6 +91,8 @@ const live2dBriefingKeepLastMs = computed(() =>
 );
 let live2dGreetingAbort: AbortController | null = null;
 const sttFromLive2dVoiceChannel = ref(false);
+let voicePlaybackTail: Promise<void> = Promise.resolve();
+let queuedVoiceSentences = 0;
 
 const showSpotlightThinkingBar = computed(() => {
   if (!store.showThinkingBar) return false;
@@ -244,125 +249,77 @@ function releaseCurrentTtsAudio() {
   }
 }
 
-function getAnswerStepSpeechText(): string {
-  const step =
-    store.agentSteps.find((item) => item.id === LIVE2D_ANSWER_STEP_ID) ??
-    store.agentSteps.find((item) => item.label === "回答") ??
-    store.agentSteps.find((item) => item.label === "执行工具与回答") ??
-    store.agentSteps.find((item) => item.label === "知识问答");
-  return step?.content ?? "";
-}
-
-async function speakAnswerStepWithLive2d(): Promise<void> {
-  const text = getAnswerStepSpeechText().trim();
-  if (!text || !live2dVisible.value || isGenericHostExecutionReply(text)) {
-    live2dHoldThinkingUntilSpeech.value = false;
-    return;
-  }
-
+function beginVoiceResponseStream(): void {
   stopTtsPlayback();
-  const speechToken = activeSpeechToken.value;
+  activeSpeechToken.value += 1;
   const controller = new AbortController();
   ttsAbortController.value = controller;
+  voicePlaybackTail = Promise.resolve();
+  queuedVoiceSentences = 0;
+  live2dHoldThinkingUntilSpeech.value = true;
+}
 
-  try {
-    const fastPlan = buildFastLive2dBriefing(text);
-    let activeSentences = fastPlan.sentences;
-    if (!activeSentences.length) {
-      live2dHoldThinkingUntilSpeech.value = false;
-      return;
-    }
-
-    let refinedPlanSentences: Live2dBriefingSentence[] | null = null;
-    let refinedApplied = false;
-    const refinedTask = summarizeLive2dBriefing(text, controller.signal)
-      .then((plan) => {
-        if (plan.sentences.length > 0) {
-          refinedPlanSentences = plan.sentences;
-        }
-      })
-      .catch(() => {});
-
-    let prefetchIndex = -1;
-    let prefetchTask: Promise<Blob> | null = null;
-    const schedulePrefetch = (index: number) => {
-      if (index < 0 || index >= activeSentences.length) return;
-      if (prefetchIndex === index && prefetchTask) return;
-      prefetchIndex = index;
-      prefetchTask = speechService
-        .synthesize(activeSentences[index]!.text, controller.signal)
-        .then((result) => result.blob);
-    };
-
-    let spokenIndex = 0;
-    while (spokenIndex < activeSentences.length) {
+function enqueueVoiceSentence(sentence: { index: number; text: string }): void {
+  const controller = ttsAbortController.value;
+  if (!controller || controller.signal.aborted || !sentence.text.trim()) return;
+  const speechToken = activeSpeechToken.value;
+  const synthesis = speechService
+    .synthesize(sentence.text, controller.signal)
+    .then(
+      (result) => ({ blob: result.blob, error: null }),
+      (error: unknown) => ({ blob: null, error }),
+    );
+  queuedVoiceSentences += 1;
+  voicePlaybackTail = voicePlaybackTail
+    .then(async () => {
+      const prefetched = await synthesis;
+      if (prefetched.error) throw prefetched.error;
+      if (!prefetched.blob) return;
       if (!isLive2dTtsSessionActive(controller, speechToken)) return;
-
-      if (!refinedApplied && refinedPlanSentences) {
-        activeSentences = refinedPlanSentences;
-        refinedApplied = true;
-        prefetchIndex = -1;
-        prefetchTask = null;
-        if (spokenIndex >= activeSentences.length) break;
-      }
-
-      const sentence = activeSentences[spokenIndex]!;
-      schedulePrefetch(spokenIndex);
-      const blob =
-        prefetchIndex === spokenIndex && prefetchTask
-          ? await prefetchTask
-          : (await speechService.synthesize(sentence.text, controller.signal))
-              .blob;
-      if (!isLive2dTtsSessionActive(controller, speechToken)) return;
-      schedulePrefetch(spokenIndex + 1);
-
-      if (spokenIndex === 0) {
+      if (sentence.index === 0) {
         dismissLive2dThinkingForSpeech();
       }
+      await playLive2dTtsBlob(
+        sentence.text,
+        prefetched.blob,
+        controller,
+        speechToken,
+        {
+          instantText: true,
+          hasFollowingClip: true,
+        },
+      );
+    })
+    .catch((err) => {
+      if (controller.signal.aborted) return;
+      store.error =
+        err instanceof Error ? err.message : "数字人语音播放失败，请稍后重试。";
+    });
+}
 
-      await playLive2dTtsBlob(sentence.text, blob, controller, speechToken, {
-        instantText: true,
-        hasFollowingClip: spokenIndex + 1 < activeSentences.length,
-      });
-
-      const pauseMs = sentence.pauseMs ?? 0;
-      if (pauseMs > 0 && isLive2dTtsSessionActive(controller, speechToken)) {
-        try {
-          await wait(pauseMs, controller.signal);
-        } catch {
-          return;
-        }
+async function finishVoiceResponseStream(): Promise<void> {
+  const controller = ttsAbortController.value;
+  if (!controller) return;
+  const speechToken = activeSpeechToken.value;
+  await voicePlaybackTail;
+  live2dHoldThinkingUntilSpeech.value = false;
+  releaseCurrentTtsAudio();
+  const live2d = await import("../avatar/spine/live2dApp.js");
+  live2d.stopLive2dLipSync();
+  if (isLive2dTtsSessionActive(controller, speechToken)) {
+    if (live2dBriefingKeepLastMs.value > 0 && queuedVoiceSentences > 0) {
+      try {
+        await wait(live2dBriefingKeepLastMs.value, controller.signal);
+      } catch {
+        // ignore abort
       }
-
-      spokenIndex += 1;
     }
-    await refinedTask;
-  } catch (err) {
-    if (controller.signal.aborted) return;
-    stopTtsPlayback();
-    const message =
-      err instanceof Error ? err.message : "数字人语音播放失败，请稍后重试。";
-    store.error = message;
-  } finally {
-    live2dHoldThinkingUntilSpeech.value = false;
-    releaseCurrentTtsAudio();
-    const live2d = await import("../avatar/spine/live2dApp.js");
-    live2d.stopLive2dLipSync();
     if (isLive2dTtsSessionActive(controller, speechToken)) {
-      if (live2dBriefingKeepLastMs.value > 0) {
-        try {
-          await wait(live2dBriefingKeepLastMs.value, controller.signal);
-        } catch {
-          // ignore abort
-        }
-      }
-      if (isLive2dTtsSessionActive(controller, speechToken)) {
-        live2dSpeech.reset();
-      }
+      live2dSpeech.reset();
     }
-    if (ttsAbortController.value === controller) {
-      ttsAbortController.value = null;
-    }
+  }
+  if (ttsAbortController.value === controller) {
+    ttsAbortController.value = null;
   }
 }
 
@@ -456,9 +413,18 @@ async function stopSpeechAndFillPrompt() {
     const trimmed = text.trim();
     if (submitAfterTranscribe) {
       sttFromLive2dVoiceChannel.value = false;
+      live2dVoiceChannel.setTranscribing(false);
       if (!trimmed) return;
       store.prompt = trimmed;
-      await store.submit();
+      beginVoiceResponseStream();
+      try {
+        await store.submit({
+          interactionMode: "voice",
+          onVoiceSentence: enqueueVoiceSentence,
+        });
+      } finally {
+        await finishVoiceResponseStream();
+      }
       return;
     }
     const current = store.prompt.trim();
@@ -568,6 +534,10 @@ function onSpotlightKeydown(event: KeyboardEvent) {
   }
 }
 
+function showLive2dAvatar(): void {
+  live2dOverlay.show();
+}
+
 function onSpotlightEscape() {
   live2dHoldThinkingUntilSpeech.value = false;
   activeSpeechToken.value += 1;
@@ -606,43 +576,6 @@ watch(live2dVisible, (on) => {
   void playLive2dGreetingWhenOpened();
 });
 
-watch(
-  () =>
-    [store.pipelinePhase, store.pipelineRunId, live2dVisible.value] as const,
-  ([phase, runId, live2dOn]) => {
-    if (!props.avatarEnabled) return;
-    if (phase === "running") {
-      live2dHoldThinkingUntilSpeech.value = false;
-      stopTtsPlayback();
-      return;
-    }
-    if (phase !== "done") {
-      if (phase === "error" || phase === "cancelled") {
-        live2dHoldThinkingUntilSpeech.value = false;
-        stopTtsPlayback();
-      }
-      return;
-    }
-    if (!live2dOn) return;
-    if (runId <= lastSpokenPipelineRunId.value) return;
-    lastSpokenPipelineRunId.value = runId;
-    void nextTick(() => {
-      const text = getAnswerStepSpeechText().trim();
-      if (
-        !text ||
-        isGenericHostExecutionReply(text) ||
-        !hasSpotlightSpeechConfig()
-      ) {
-        live2dHoldThinkingUntilSpeech.value = false;
-        return;
-      }
-      live2dHoldThinkingUntilSpeech.value = true;
-      activeSpeechToken.value += 1;
-      void speakAnswerStepWithLive2d();
-    });
-  },
-);
-
 onMounted(() => {
   if (props.avatarEnabled && avatarConfig.initiallyVisible) {
     live2dOverlay.show();
@@ -656,3 +589,65 @@ onUnmounted(() => {
   live2dVoiceChannel.reset();
 });
 </script>
+
+<style scoped>
+.spotlight-avatar-reopen {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 2147483001;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 8px 13px 8px 10px;
+  border: 1px solid rgba(14, 165, 233, 0.32);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: #0f766e;
+  font: 600 13px/1 system-ui, sans-serif;
+  cursor: pointer;
+  box-shadow: 0 12px 30px rgba(15, 118, 110, 0.2);
+  backdrop-filter: blur(12px);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.spotlight-avatar-reopen:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(15, 118, 110, 0.26);
+}
+
+.spotlight-avatar-reopen__drop {
+  position: relative;
+  width: 22px;
+  height: 22px;
+  border-radius: 55% 45% 60% 40%;
+  background: linear-gradient(145deg, #38bdf8, #14b8a6);
+  transform: rotate(45deg);
+  box-shadow: inset 3px 3px 5px rgba(255, 255, 255, 0.42);
+}
+
+.spotlight-avatar-reopen__drop::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.86);
+}
+
+.spotlight-avatar-reopen__label {
+  letter-spacing: 0.04em;
+}
+
+@media (max-width: 720px) {
+  .spotlight-avatar-reopen {
+    right: 14px;
+    bottom: 14px;
+  }
+}
+</style>

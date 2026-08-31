@@ -88,4 +88,28 @@ describe("SpotlightLifecycleProjector", () => {
       }),
     ]));
   });
+
+  it("projects each streamed voice sentence as a stable completed Item", () => {
+    const projector = new SpotlightLifecycleProjector("thread-1", "turn-1", 1);
+    const events = projector.project({
+      type: "voice_sentence",
+      at: 5,
+      seq: 3,
+      index: 1,
+      text: "第二句口播。",
+    });
+
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          id: "voice:turn-1:1",
+          type: "voice_sentence",
+          index: 1,
+          text: "第二句口播。",
+          status: "completed",
+        }),
+      }),
+    ]);
+  });
 });

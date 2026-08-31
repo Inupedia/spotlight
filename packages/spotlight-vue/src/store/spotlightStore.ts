@@ -580,7 +580,9 @@ export const useSpotlightStore = defineStore("spotlight", {
         this.selectedIndex < 0 ? n - 1 : (this.selectedIndex - 1 + n) % n;
     },
 
-    async submit(options?: { forceMemoryRefresh?: boolean }) {
+    async submit(
+      options?: import("../remote/runPipeline.js").SpotlightPipelineRunOptions,
+    ) {
       if (!this.prompt.trim() || this.loading) return;
       const runId = this.pipelineRunId + 1;
       this.pipelineRunId = runId;

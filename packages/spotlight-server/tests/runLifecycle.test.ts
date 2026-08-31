@@ -249,6 +249,51 @@ describe("run lifecycle across connections", () => {
 });
 
 describe("Thread / Turn / Item lifecycle API", () => {
+  it("streams voice sentences before completing a voice turn", async () => {
+    const runs = manager(knowledgeDecision);
+    const app = await buildServer({ runManager: runs, projectId: "test-project" });
+    try {
+      const { userQuestion: _userQuestion, ...request } = runRequest(
+        "介绍一下引大济岷",
+      );
+      const turnResponse = await app.inject({
+        method: "POST",
+        url: "/v1/threads/thread-voice/turns",
+        payload: {
+          ...request,
+          input: "介绍一下引大济岷",
+          interactionMode: "voice",
+        },
+      });
+      expect(turnResponse.statusCode).toBe(200);
+      const turnId = turnResponse.json().turn.id as string;
+      await waitFor(() => runs.getRun(turnId)?.status === "completed");
+
+      const stream = await app.inject({
+        method: "GET",
+        url: `/v1/turns/${turnId}/events`,
+      });
+      const lifecycleEvents = stream.body
+        .split("\n")
+        .filter((line) => line.startsWith("data: "))
+        .map((line) => JSON.parse(line.slice(6)) as {
+          type: string;
+          item?: { type?: string };
+        });
+      const itemTypes = lifecycleEvents
+        .filter((event) => event.type === "item.completed")
+        .map((event) => event.item?.type);
+
+      expect(itemTypes).toContain("voice_sentence");
+      expect(itemTypes.indexOf("voice_sentence")).toBeLessThan(
+        itemTypes.indexOf("agent_message"),
+      );
+      expect(lifecycleEvents.at(-1)?.type).toBe("turn.completed");
+    } finally {
+      await app.close();
+    }
+  });
+
   it("runs a browser Tool and exposes structured Skill and Tool items", async () => {
     const runs = manager(actionDecision);
     const app = await buildServer({ runManager: runs, projectId: "test-project" });

@@ -39,6 +39,12 @@ import type { SpotlightPipelineRunOutcome } from "./types.js";
 
 const activeRunBySignal = new WeakMap<AbortSignal, string>();
 
+export interface SpotlightPipelineRunOptions {
+  forceMemoryRefresh?: boolean;
+  interactionMode?: "text" | "voice";
+  onVoiceSentence?: (sentence: { index: number; text: string }) => void;
+}
+
 type RemoteRunEvent =
   | SpotlightExecutionEvent
   | {
@@ -409,6 +415,25 @@ export function applyLangGraphTransition(
         summary ?? "页面操作已完成。",
       );
       return;
+    case "voice_briefing_start":
+      completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.answer);
+      setTransitionStep(
+        api,
+        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
+        "生成语音",
+        "active",
+        summary ?? "正在生成适合口播的短句。",
+      );
+      return;
+    case "voice_briefing_done":
+      setTransitionStep(
+        api,
+        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
+        "生成语音",
+        "done",
+        summary ?? "口播内容已生成。",
+      );
+      return;
     case "memory_recall":
       setTransitionStep(
         api,
@@ -664,6 +689,16 @@ export async function applyLifecycleEvent(
   if (event.type === "item.started" || event.type === "item.updated" || event.type === "item.completed") {
     const item = event.item;
     if (item.type === "reasoning") {
+      if (item.category === "voice") {
+        setTransitionStep(
+          api,
+          SPOTLIGHT_PIPELINE_STEP_IDS.voice,
+          "生成语音",
+          item.summary.includes("已生成") ? "done" : "active",
+          item.summary,
+        );
+        return;
+      }
       if (item.category === "routing" || item.category === "memory") {
         setTransitionStep(
           api,
@@ -727,6 +762,15 @@ export async function applyLifecycleEvent(
       completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.act);
       ensureStep(api, SPOTLIGHT_PIPELINE_STEP_IDS.answer, "回答");
       api.setStep(SPOTLIGHT_PIPELINE_STEP_IDS.answer, "done", item.text.trim());
+      return;
+    }
+    if (item.type === "voice_sentence") {
+      ensureStep(api, SPOTLIGHT_PIPELINE_STEP_IDS.voice, "生成语音");
+      api.setStep(
+        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
+        "active",
+        `已生成第 ${item.index + 1} 句口播内容。`,
+      );
       return;
     }
     if (item.type === "error") {
@@ -832,7 +876,7 @@ export async function warmupSpotlightRemoteContext(
 async function buildRemotePayload(
   userQuestion: string,
   signal?: AbortSignal,
-  options?: { forceMemoryRefresh?: boolean },
+  options?: SpotlightPipelineRunOptions,
 ) {
   const session = useAgentSessionStore();
   const runtime = useSpotlightRuntimeStore();
@@ -843,6 +887,7 @@ async function buildRemotePayload(
     payload: {
       projectId: getSpotlightProjectId(),
       input: userQuestion,
+      interactionMode: options?.interactionMode ?? "text",
       memorySubjectId: getSpotlightConfig().getMemorySubjectId?.() ?? undefined,
       memoryRefreshRequested: options?.forceMemoryRefresh === true,
       uiContext: getSpotlightConfig().getUiContext?.() ?? {},
@@ -875,7 +920,7 @@ async function buildRemotePayload(
 export async function runRemoteSpotlightPipeline(
   userQuestion: string,
   api: HandlerApi,
-  options?: { forceMemoryRefresh?: boolean },
+  options?: SpotlightPipelineRunOptions,
 ): Promise<SpotlightPipelineRunOutcome> {
   const signal = api.getSignal();
   const { payload, hostManifest } = await buildRemotePayload(
@@ -904,6 +949,17 @@ export async function runRemoteSpotlightPipeline(
     );
   }
   for await (const event of client.streamTurn(turn.id, signal)) {
+    if (
+      (event.type === "item.started" ||
+        event.type === "item.updated" ||
+        event.type === "item.completed") &&
+      event.item.type === "voice_sentence"
+    ) {
+      options?.onVoiceSentence?.({
+        index: event.item.index,
+        text: event.item.text,
+      });
+    }
     await applyLifecycleEvent(api, event, lookup);
     if (
       (event.type === "item.started" || event.type === "item.updated") &&

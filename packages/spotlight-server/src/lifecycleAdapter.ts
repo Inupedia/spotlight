@@ -8,6 +8,7 @@ import type {
   SpotlightToolCallItem,
   SpotlightTurn,
   SpotlightTurnEvent,
+  SpotlightVoiceSentenceItem,
 } from "@inupedia/spotlight-protocol";
 import type { SpotlightServerRunEvent } from "./runManager.js";
 
@@ -121,6 +122,8 @@ export class SpotlightLifecycleProjector {
         type: "reasoning",
         category: event.phase === "memory_recall"
           ? "memory"
+          : event.phase.startsWith("voice_briefing")
+            ? "voice"
           : event.phase === "routing" || event.phase === "analyzing" || event.phase === "router_done"
             ? "routing"
             : "progress",
@@ -269,6 +272,17 @@ export class SpotlightLifecycleProjector {
         status: "in_progress",
         startedAt: at,
       } satisfies SpotlightAgentMessageItem, at);
+      return [this.emitItem(at, "item.completed", item)];
+    }
+    if (event.type === "voice_sentence") {
+      const item = completedAt({
+        id: `voice:${this.turnId}:${event.index}`,
+        type: "voice_sentence",
+        index: event.index,
+        text: event.text,
+        status: "in_progress",
+        startedAt: at,
+      } satisfies SpotlightVoiceSentenceItem, at);
       return [this.emitItem(at, "item.completed", item)];
     }
     if (event.type === "run_completed") {

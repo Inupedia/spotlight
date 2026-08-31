@@ -28,6 +28,10 @@ export const RuntimeState = Annotation.Root({
     default: () => "",
   }),
   assistantReply: Annotation<string>(),
+  voiceBriefing: Annotation<string[]>({
+    reducer: (_left, right) => right,
+    default: () => [],
+  }),
   invokedClientTools: Annotation<string[]>({
     reducer: (left, right) => {
       if (right[0] === INVOKED_TOOLS_TURN_RESET) return right.slice(1);
@@ -110,6 +114,7 @@ export function initialRuntimeState(
     messages: messages ?? [new HumanMessage(question)],
     invokedClientTools: [INVOKED_TOOLS_TURN_RESET],
     assistantReply: "",
+    voiceBriefing: [],
     skipGather: false,
     skipMemoryRecall: false,
     memoryContext: "",

@@ -16,6 +16,7 @@ describe("Spotlight application lifecycle protocol", () => {
         "knowledge_search",
         "memory",
         "agent_message",
+        "voice_sentence",
         "error",
       ],
       toolResultSubmission: true,

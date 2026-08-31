@@ -82,6 +82,7 @@ import {
 } from "./synthesize.js";
 import type { SpotlightGraphOptions } from "./types.js";
 import { resolveGatherSources } from "../knowledgeSource.js";
+import { streamVoiceBriefing } from "./voiceBriefing.js";
 
 function knowledgeToolCall(
   name: string,
@@ -858,6 +859,35 @@ export function compileSpotlightWorkflow(
         "我还不能安全地确定你要执行的操作或目标，请明确说要打开、关闭、播放或切换什么。";
       return { ...assistantUpdate(reply), invokedClientTools: [] };
     })
+    .addNode("voice_briefing", async (state, config) => {
+      if (context.request.interactionMode !== "voice") {
+        return { voiceBriefing: [] };
+      }
+      const answer = state.assistantReply?.trim();
+      if (!answer) return { voiceBriefing: [] };
+      emitPhase(
+        config,
+        options,
+        "voice_briefing_start",
+        "正在把完整回答压缩成适合数字人口播的短句。",
+      );
+      const sentences = await streamVoiceBriefing({
+        model: options.model,
+        question: state.question,
+        answer,
+        config,
+        onSentence: options.onVoiceSentence,
+      });
+      emitPhase(
+        config,
+        options,
+        "voice_briefing_done",
+        sentences.length > 0
+          ? `已生成 ${sentences.length} 句口播内容。`
+          : "没有生成可播报的口播内容，保留完整文字回答。",
+      );
+      return { voiceBriefing: sentences };
+    })
     .addEdge(START, "route")
     .addConditionalEdges("route", (state) => {
       if (state.lane === "memory_mutate") return "memory_mutate";
@@ -883,11 +913,12 @@ export function compileSpotlightWorkflow(
     .addConditionalEdges("decide", (state) =>
       state.lane === "action" ? "action_plan" : "clarify",
     )
-    .addEdge("knowledge_synthesize", END)
+    .addEdge("knowledge_synthesize", "voice_briefing")
     .addEdge("action_plan", "action_execute")
     .addEdge("action_execute", "action_confirm")
-    .addEdge("action_confirm", END)
-    .addEdge("memory_mutate", END)
-    .addEdge("clarify", END)
+    .addEdge("action_confirm", "voice_briefing")
+    .addEdge("memory_mutate", "voice_briefing")
+    .addEdge("clarify", "voice_briefing")
+    .addEdge("voice_briefing", END)
     .compile({ checkpointer: options.checkpointer, store: options.store });
 }

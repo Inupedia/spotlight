@@ -5,6 +5,7 @@ export const SPOTLIGHT_PIPELINE_STEP_IDS = {
   gather: "gather",
   act: "act",
   answer: "answer",
+  voice: "voice",
   /** @deprecated 0.5.17 thinking-bar IA; kept for old event ids */
   breakdown: "1",
   intent: "2",
@@ -18,6 +19,7 @@ export const SPOTLIGHT_PIPELINE_STEP_LABELS = {
   gather: "获取信息",
   act: "操作页面",
   answer: "回答",
+  voice: "生成语音",
   breakdown: "理解问题",
   intent: "理解问题",
   tool: "获取信息",

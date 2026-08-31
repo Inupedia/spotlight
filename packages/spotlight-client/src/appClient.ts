@@ -226,7 +226,7 @@ export class SpotlightAppClient {
           clientInfo: {
             name: this.options.clientInfo?.name ?? "spotlight-typescript",
             title: this.options.clientInfo?.title,
-            version: this.options.clientInfo?.version ?? "0.8.5",
+            version: this.options.clientInfo?.version ?? "0.8.6",
           },
           capabilities: defaultSpotlightClientCapabilities(),
           toolManifest: manifest,

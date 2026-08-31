@@ -159,7 +159,7 @@ interface SpotlightItemBase {
 
 export interface SpotlightReasoningItem extends SpotlightItemBase {
   type: "reasoning";
-  category: "routing" | "planning" | "memory" | "progress";
+  category: "routing" | "planning" | "memory" | "voice" | "progress";
   summary: string;
 }
 
@@ -220,6 +220,13 @@ export interface SpotlightAgentMessageItem extends SpotlightItemBase {
   text: string;
 }
 
+/** One complete, speakable sentence emitted by the LangGraph voice node. */
+export interface SpotlightVoiceSentenceItem extends SpotlightItemBase {
+  type: "voice_sentence";
+  index: number;
+  text: string;
+}
+
 export interface SpotlightErrorItem extends SpotlightItemBase {
   type: "error";
   message: string;
@@ -233,6 +240,7 @@ export type SpotlightItem =
   | SpotlightKnowledgeSearchItem
   | SpotlightMemoryItem
   | SpotlightAgentMessageItem
+  | SpotlightVoiceSentenceItem
   | SpotlightErrorItem;
 
 interface SpotlightEventBase {
@@ -283,6 +291,7 @@ export function defaultSpotlightClientCapabilities(): SpotlightClientCapabilitie
       "knowledge_search",
       "memory",
       "agent_message",
+      "voice_sentence",
       "error",
     ],
     toolResultSubmission: true,

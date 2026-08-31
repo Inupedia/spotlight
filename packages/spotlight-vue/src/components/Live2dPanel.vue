@@ -22,6 +22,7 @@
         :aria-label="voiceButtonLabel"
         @click="onVoiceClick"
       >
+        <span class="live2d-voice-ring" aria-hidden="true" />
         <span class="live2d-mic-icon" aria-hidden="true" />
       </button>
       <span class="live2d-voice-label">{{ voiceButtonLabel }}</span>
@@ -222,7 +223,37 @@ onUnmounted(() => {
 
 .live2d-voice-button.is-transcribing {
   cursor: wait;
-  animation: voice-spin 1.3s linear infinite;
+  color: #0f766e;
+}
+
+.live2d-voice-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    rgba(14, 165, 233, 0.08),
+    #0ea5e9,
+    #14b8a6,
+    rgba(14, 165, 233, 0.08) 72%
+  );
+  opacity: 0;
+  pointer-events: none;
+  -webkit-mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3px),
+    #000 calc(100% - 2px)
+  );
+  mask: radial-gradient(
+    farthest-side,
+    transparent calc(100% - 3px),
+    #000 calc(100% - 2px)
+  );
+}
+
+.live2d-voice-button.is-transcribing .live2d-voice-ring {
+  opacity: 1;
+  animation: voice-ring-spin 1.3s linear infinite;
 }
 
 .live2d-voice-button:disabled {
@@ -379,7 +410,7 @@ onUnmounted(() => {
   }
 }
 
-@keyframes voice-spin {
+@keyframes voice-ring-spin {
   to {
     transform: rotate(360deg);
   }

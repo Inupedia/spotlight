@@ -245,6 +245,8 @@ export interface CreateRunRequest {
   /** Stable authenticated subject id for opt-in cross-session memory. */
   memorySubjectId?: string;
   userQuestion: string;
+  /** Input/output presentation requested by the host for this turn. */
+  interactionMode?: "text" | "voice";
   /** One-shot override: bypass reusable memory and verify against sources. */
   memoryRefreshRequested?: boolean;
   uiContext?: AgentUiContext;

@@ -49,6 +49,7 @@ function context(
     sessionId?: string;
     memorySubjectId?: string;
     memoryEnabled?: boolean;
+    interactionMode?: "text" | "voice";
   } = {},
 ): RunContext {
   return {
@@ -56,6 +57,7 @@ function context(
       projectId: "test-project",
       sessionId: options.sessionId ?? crypto.randomUUID(),
       memorySubjectId: options.memorySubjectId,
+      interactionMode: options.interactionMode,
       sessionState:
         options.memoryEnabled === undefined
           ? undefined
@@ -131,6 +133,45 @@ describe("LangGraph runtime isolation", () => {
       phase: "knowledge_agent_done",
       summary: "已根据本次注册的 1 个 Skill 和 1 个页面 Tool 生成能力说明。",
     });
+    expect(phases.some(({ phase }) => phase.startsWith("voice_briefing"))).toBe(
+      false,
+    );
+  });
+
+  it("adds a streaming voice briefing only for a voice turn", async () => {
+    const runContext = context("你能做什么", [], { interactionMode: "voice" });
+    runContext.request.skills = [
+      {
+        name: "skill.monitoring",
+        displayName: "现场监控",
+        description: "处理监控画面",
+        allowedTools: [descriptor.name],
+        capabilityExamples: ["打开钢筋棚监控"],
+      },
+    ];
+    runContext.project.uiPrompts = { capabilityHelpPatterns: ["你能做什么"] };
+    const phases: string[] = [];
+    const voiceSentences: Array<{ index: number; text: string }> = [];
+
+    const result = await runSpotlightGraph(runContext, {
+      model: new FakeToolCallingModel(),
+      router: router({
+        route: "knowledge",
+        confidence: 1,
+        reason: "capability help",
+        requestedToolNames: [],
+        explicitActionEvidence: null,
+      }),
+      checkpointer: new MemorySaver(),
+      store: new InMemoryStore(),
+      onPhase: (phase) => phases.push(phase),
+      onVoiceSentence: (sentence) => voiceSentences.push(sentence),
+    });
+
+    expect(result.assistantReply).toContain("现场监控");
+    expect(voiceSentences.length).toBeGreaterThan(0);
+    expect(phases).toContain("voice_briefing_start");
+    expect(phases).toContain("voice_briefing_done");
   });
 
   it("never exposes a client tool to the knowledge agent", async () => {

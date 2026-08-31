@@ -45,7 +45,7 @@ export const spotlightTools = [closeVideo];
 ## 1. 安装
 
 ```bash
-pnpm add @inupedia/spotlight-client@0.8.5 @inupedia/spotlight-protocol@0.8.5 @inupedia/spotlight-vue@0.8.5
+pnpm add @inupedia/spotlight-client@0.8.6 @inupedia/spotlight-protocol@0.8.6 @inupedia/spotlight-vue@0.8.6
 ```
 
 ## 2. 配置 Vite
@@ -240,7 +240,7 @@ Server 读取可信清单后，将 Client Tool 转为真正的 LangChain Tool。
 
 ## 从 0.7.x 迁移到 0.9.x
 
-1. 将使用到的 `@inupedia/spotlight-*` 包统一升级到 `0.8.5`，不要混装 `link:`、本地构建和 Registry 包。
+1. 将使用到的 `@inupedia/spotlight-*` 包统一升级到 `0.8.6`，不要混装 `link:`、本地构建和 Registry 包。
 2. 小型固定动作继续使用 `defineClientTool`；非 Vite 宿主可改用显式 `defineTool`，无需迁移构建系统。
 3. 摄像头、资产、工单、BIM 构件等大型/动态目录迁移为 `defineResourceProvider`，删除 Server named-target catalog 和重复的前端别名解析。
 4. 在 Spotlight 配置中注册 `resources`；Skill 只保留业务流程和 generated Tool dependencies，不枚举实体目录。

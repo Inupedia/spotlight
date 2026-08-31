@@ -53,6 +53,12 @@ export type SpotlightServerRunEventBody =
     }
   | { type: "assistant_response"; at: number; iteration: number; content: string }
   | {
+      type: "voice_sentence";
+      at: number;
+      index: number;
+      text: string;
+    }
+  | {
       type: "run_status";
       at: number;
       runId: string;
@@ -596,6 +602,12 @@ export class RunManager {
             },
           });
         },
+        onVoiceSentence: (sentence: { index: number; text: string }) =>
+          this.emit(run, {
+            type: "voice_sentence" as const,
+            at: Date.now(),
+            ...sentence,
+          }),
       };
       const graph = compileSpotlightGraph(context, graphOptions);
       const runConfig = {
