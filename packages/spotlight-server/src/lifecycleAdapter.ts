@@ -32,6 +32,13 @@ function matchedSkills(summary: string | undefined): string[] {
     : [];
 }
 
+function skillDisplayName(
+  skill: string,
+  names: Map<string, string>,
+): string {
+  return names.get(skill) ?? (skill === "skill.spoken-briefing" ? "口播转写" : skill);
+}
+
 function isKnowledgeTool(name: string): boolean {
   return name === "web_search" || name === "project_knowledge_search";
 }
@@ -122,7 +129,8 @@ export class SpotlightLifecycleProjector {
         type: "reasoning",
         category: event.phase === "memory_recall"
           ? "memory"
-          : event.phase.startsWith("voice_briefing")
+          : event.phase.startsWith("voice_speak") ||
+              event.phase.startsWith("voice_briefing")
             ? "voice"
           : event.phase === "routing" || event.phase === "analyzing" || event.phase === "router_done"
             ? "routing"
@@ -138,7 +146,7 @@ export class SpotlightLifecycleProjector {
           id: `skill:${skill}:${event.seq}`,
           type: "skill_use",
           skill,
-          displayName: this.skillNames.get(skill) ?? skill,
+          displayName: skillDisplayName(skill, this.skillNames),
           source: "router",
           summary: `已选择 Skill：${skill}`,
           status: "in_progress",
@@ -280,6 +288,7 @@ export class SpotlightLifecycleProjector {
         type: "voice_sentence",
         index: event.index,
         text: event.text,
+        generation: event.generation,
         status: "in_progress",
         startedAt: at,
       } satisfies SpotlightVoiceSentenceItem, at);

@@ -468,4 +468,72 @@ describe("Thread / Turn / Item progress", () => {
     ]));
     expect(JSON.stringify(getSteps())).not.toContain("router_done");
   });
+
+  it("does not put spoken rewrite into the thinking bar", async () => {
+    const { api, getSteps } = createApi();
+    applyLangGraphTransition(api, transition("voice_speak_start", "正在把本轮结果压成口播短句。"));
+    applyLangGraphTransition(api, transition("voice_speak_done", "已生成本轮口播 2 句。"));
+    await applyLifecycleEvent(api, {
+      type: "item.completed",
+      at: 1,
+      seq: 1,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "voice-reasoning",
+        type: "reasoning",
+        category: "voice",
+        summary: "正在把本轮结果压成口播短句。",
+        status: "completed",
+        startedAt: 1,
+        completedAt: 1,
+      },
+    });
+    await applyLifecycleEvent(api, {
+      type: "item.completed",
+      at: 2,
+      seq: 2,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "voice:turn-1:0",
+        type: "voice_sentence",
+        index: 0,
+        text: "建设程序已经打开。",
+        generation: 0,
+        status: "completed",
+        startedAt: 2,
+        completedAt: 2,
+      },
+    });
+    expect(getSteps()).toEqual([]);
+  });
+
+  it("shows the spoken-briefing runtime skill in the skill step", async () => {
+    const { api, getSteps } = createApi();
+    await applyLifecycleEvent(api, {
+      type: "item.completed",
+      at: 1,
+      seq: 1,
+      threadId: "thread-1",
+      turnId: "turn-1",
+      item: {
+        id: "skill-spoken",
+        type: "skill_use",
+        skill: "skill.spoken-briefing",
+        displayName: "口播转写",
+        source: "router",
+        status: "completed",
+        startedAt: 1,
+        completedAt: 1,
+      },
+    });
+    expect(getSteps()).toEqual([
+      expect.objectContaining({
+        label: "使用 Skill",
+        content: "- 口播转写（skill.spoken-briefing）",
+        status: "done",
+      }),
+    ]);
+  });
 });

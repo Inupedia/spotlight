@@ -42,7 +42,11 @@ const activeRunBySignal = new WeakMap<AbortSignal, string>();
 export interface SpotlightPipelineRunOptions {
   forceMemoryRefresh?: boolean;
   interactionMode?: "text" | "voice";
-  onVoiceSentence?: (sentence: { index: number; text: string }) => void;
+  onVoiceSentence?: (sentence: {
+    index: number;
+    text: string;
+    generation?: number;
+  }) => void;
 }
 
 type RemoteRunEvent =
@@ -416,23 +420,11 @@ export function applyLangGraphTransition(
       );
       return;
     case "voice_briefing_start":
+    case "voice_speak_start":
       completeStepIfPresent(api, SPOTLIGHT_PIPELINE_STEP_IDS.answer);
-      setTransitionStep(
-        api,
-        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
-        "生成语音",
-        "active",
-        summary ?? "正在生成适合口播的短句。",
-      );
       return;
     case "voice_briefing_done":
-      setTransitionStep(
-        api,
-        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
-        "生成语音",
-        "done",
-        summary ?? "口播内容已生成。",
-      );
+    case "voice_speak_done":
       return;
     case "memory_recall":
       setTransitionStep(
@@ -690,13 +682,6 @@ export async function applyLifecycleEvent(
     const item = event.item;
     if (item.type === "reasoning") {
       if (item.category === "voice") {
-        setTransitionStep(
-          api,
-          SPOTLIGHT_PIPELINE_STEP_IDS.voice,
-          "生成语音",
-          item.summary.includes("已生成") ? "done" : "active",
-          item.summary,
-        );
         return;
       }
       if (item.category === "routing" || item.category === "memory") {
@@ -765,12 +750,6 @@ export async function applyLifecycleEvent(
       return;
     }
     if (item.type === "voice_sentence") {
-      ensureStep(api, SPOTLIGHT_PIPELINE_STEP_IDS.voice, "生成语音");
-      api.setStep(
-        SPOTLIGHT_PIPELINE_STEP_IDS.voice,
-        "active",
-        `已生成第 ${item.index + 1} 句口播内容。`,
-      );
       return;
     }
     if (item.type === "error") {
@@ -958,6 +937,7 @@ export async function runRemoteSpotlightPipeline(
       options?.onVoiceSentence?.({
         index: event.item.index,
         text: event.item.text,
+        generation: event.item.generation,
       });
     }
     await applyLifecycleEvent(api, event, lookup);

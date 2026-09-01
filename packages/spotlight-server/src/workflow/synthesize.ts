@@ -67,6 +67,7 @@ export function buildKnowledgeSynthesizeMessages(input: {
         "Cite source titles or URLs when available. If sufficiency is none or partial, say the evidence is insufficient.",
         "Never mention internal labels such as Hikari, Tavily, untitled, or 联网检索证据.",
         "Long-term memory is user-scoped context, not evidence.",
+        "The on-screen answer may include Markdown, lists, or tables. A later spoken-rewrite step will compress that for TTS; do not flatten the visual answer into slogans.",
         input.memoryContext,
         evidenceContext,
         input.observedPrompt ?? "",

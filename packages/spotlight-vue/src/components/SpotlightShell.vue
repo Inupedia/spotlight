@@ -34,8 +34,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
-import { waitForAudioNaturalEnd } from "../avatar/speech/live2dTtsPlayback.js";
-import type { WavEnvelope } from "../avatar/spine/live2dApp.js";
+import {
+  VoiceTurnController,
+  drainSpokenClips,
+  packSpokenSentences,
+  sanitizeSpokenText,
+} from "@inupedia/spotlight-protocol";
+import {
+  decodeTtsAudioFromBlob,
+  playTtsAudioBuffer,
+  stopTtsBufferPlayback,
+  appendSilenceToAudioBuffer,
+  getTtsPlaybackContext,
+  TTS_CLIP_SILENCE_MS,
+} from "../avatar/speech/live2dTtsPlayback.js";
 import {
   hasSpotlightSpeechConfig,
   SpotlightSpeechService,
@@ -43,6 +55,10 @@ import {
 import { storeToRefs } from "pinia";
 import { useSpotlightStore } from "../store/spotlightStore.js";
 import { useSpotlightAvatarConfig } from "../avatar/config.js";
+import { unlockVoicePlayback } from "../avatar/voice/voiceSession.js";
+import { shouldAbortVoiceOnPanelHide } from "../avatar/voice/panelHidePolicy.js";
+import { directorPhaseFromTurn } from "../avatar/voice/avatarDirector.js";
+import { useAgentSessionStore } from "../session/agentSession.js";
 import SpotlightRoot from "./SpotlightRoot.vue";
 import Live2dPanel from "./Live2dPanel.vue";
 import { useLive2dOverlayStore } from "../store/live2dOverlayStore.js";
@@ -77,8 +93,6 @@ const voiceHoldActive = ref(false);
 const speechPending = ref(false);
 const voiceStarting = ref(false);
 const speechAbortController = ref<AbortController | null>(null);
-const ttsAudio = ref<HTMLAudioElement | null>(null);
-const ttsAudioUrl = ref<string | null>(null);
 const ttsAbortController = ref<AbortController | null>(null);
 const activeSpeechToken = ref(0);
 const live2dHoldThinkingUntilSpeech = ref(false);
@@ -93,6 +107,25 @@ let live2dGreetingAbort: AbortController | null = null;
 const sttFromLive2dVoiceChannel = ref(false);
 let voicePlaybackTail: Promise<void> = Promise.resolve();
 let queuedVoiceSentences = 0;
+const voiceController = new VoiceTurnController();
+const voicePlayoutHold = ref(false);
+let activeVoiceTurnId = "";
+let voicePhraseGeneration = 0;
+let heldSpokenClip = "";
+let spokenClipIndex = 0;
+
+voiceController.onAbort(async () => {
+  store.cancelPipeline();
+  voicePlayoutHold.value = false;
+  heldSpokenClip = "";
+  spokenClipIndex = 0;
+  stopTtsPlayback();
+  cancelSpeechSession();
+  live2dSpeech.reset();
+  void import("../avatar/spine/live2dApp.js").then((live2d) =>
+    live2d.stopLive2dLipSync(),
+  );
+});
 
 const showSpotlightThinkingBar = computed(() => {
   if (!store.showThinkingBar) return false;
@@ -238,15 +271,31 @@ async function playLive2dGreetingWhenOpened(): Promise<void> {
 }
 
 function releaseCurrentTtsAudio() {
-  if (ttsAudio.value) {
-    ttsAudio.value.pause();
-    ttsAudio.value.src = "";
-    ttsAudio.value = null;
+  stopTtsBufferPlayback();
+}
+
+function newVoiceTurnId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? `turn-${Date.now()}-${Math.random()}`;
+}
+
+function latestAssistantReply(): string {
+  const session = useAgentSessionStore();
+  for (let index = session.conversationHistory.length - 1; index >= 0; index -= 1) {
+    const turn = session.conversationHistory[index];
+    if (turn?.role === "assistant" && turn.content.trim()) {
+      return turn.content.trim();
+    }
   }
-  if (ttsAudioUrl.value) {
-    URL.revokeObjectURL(ttsAudioUrl.value);
-    ttsAudioUrl.value = null;
-  }
+  return "";
+}
+
+function enqueueFallbackReply(reply: string): void {
+  const phrases = packSpokenSentences(reply);
+  if (phrases.length === 0) return;
+  voiceController.setPhase("speaking");
+  phrases.forEach((text, index) => {
+    enqueueVoiceSentence({ index, text });
+  });
 }
 
 function beginVoiceResponseStream(): void {
@@ -256,15 +305,22 @@ function beginVoiceResponseStream(): void {
   ttsAbortController.value = controller;
   voicePlaybackTail = Promise.resolve();
   queuedVoiceSentences = 0;
+  heldSpokenClip = "";
+  spokenClipIndex = 0;
   live2dHoldThinkingUntilSpeech.value = true;
+  voicePlayoutHold.value = true;
+  activeVoiceTurnId = newVoiceTurnId();
+  voicePhraseGeneration = 0;
 }
 
-function enqueueVoiceSentence(sentence: { index: number; text: string }): void {
+function synthesizeSpokenClip(spokenText: string): void {
   const controller = ttsAbortController.value;
-  if (!controller || controller.signal.aborted || !sentence.text.trim()) return;
+  if (!controller || controller.signal.aborted || !spokenText) return;
   const speechToken = activeSpeechToken.value;
+  const clipIndex = spokenClipIndex;
+  spokenClipIndex += 1;
   const synthesis = speechService
-    .synthesize(sentence.text, controller.signal)
+    .synthesize(spokenText, controller.signal)
     .then(
       (result) => ({ blob: result.blob, error: null }),
       (error: unknown) => ({ blob: null, error }),
@@ -276,17 +332,22 @@ function enqueueVoiceSentence(sentence: { index: number; text: string }): void {
       if (prefetched.error) throw prefetched.error;
       if (!prefetched.blob) return;
       if (!isLive2dTtsSessionActive(controller, speechToken)) return;
-      if (sentence.index === 0) {
+      if (clipIndex === 0) {
         dismissLive2dThinkingForSpeech();
       }
+      const hasFollowingClip =
+        spokenClipIndex > clipIndex + 1 ||
+        heldSpokenClip.length > 0 ||
+        store.pipelinePhase === "running" ||
+        store.loading;
       await playLive2dTtsBlob(
-        sentence.text,
+        spokenText,
         prefetched.blob,
         controller,
         speechToken,
         {
           instantText: true,
-          hasFollowingClip: true,
+          hasFollowingClip,
         },
       );
     })
@@ -297,13 +358,45 @@ function enqueueVoiceSentence(sentence: { index: number; text: string }): void {
     });
 }
 
+function flushHeldSpokenClip(): void {
+  if (!heldSpokenClip) return;
+  const drained = drainSpokenClips(heldSpokenClip, { force: true });
+  heldSpokenClip = "";
+  for (const clip of drained.ready) synthesizeSpokenClip(clip);
+}
+
+function enqueueVoiceSentence(sentence: {
+  index: number;
+  text: string;
+  generation?: number;
+}): void {
+  if (
+    sentence.generation != null &&
+    sentence.generation !== voicePhraseGeneration
+  ) {
+    voicePhraseGeneration = sentence.generation;
+    activeVoiceTurnId = newVoiceTurnId();
+    voicePlaybackTail = Promise.resolve();
+    heldSpokenClip = "";
+    spokenClipIndex = 0;
+  }
+  const spokenText = sanitizeSpokenText(sentence.text);
+  if (!spokenText) return;
+  heldSpokenClip += spokenText;
+  const drained = drainSpokenClips(heldSpokenClip);
+  heldSpokenClip = drained.rest;
+  for (const clip of drained.ready) synthesizeSpokenClip(clip);
+}
+
 async function finishVoiceResponseStream(): Promise<void> {
   const controller = ttsAbortController.value;
-  if (!controller) return;
+  if (!controller) {
+    voicePlayoutHold.value = false;
+    return;
+  }
   const speechToken = activeSpeechToken.value;
   await voicePlaybackTail;
   live2dHoldThinkingUntilSpeech.value = false;
-  releaseCurrentTtsAudio();
   const live2d = await import("../avatar/spine/live2dApp.js");
   live2d.stopLive2dLipSync();
   if (isLive2dTtsSessionActive(controller, speechToken)) {
@@ -321,6 +414,7 @@ async function finishVoiceResponseStream(): Promise<void> {
   if (ttsAbortController.value === controller) {
     ttsAbortController.value = null;
   }
+  voicePlayoutHold.value = false;
 }
 
 function isLive2dTtsSessionActive(
@@ -338,7 +432,6 @@ async function playLive2dTtsBlob(
   options?: {
     instantText?: boolean;
     hasFollowingClip?: boolean;
-    lipSyncEnvelope?: WavEnvelope;
     playHelloWithSpeech?: boolean;
   },
 ): Promise<void> {
@@ -346,16 +439,9 @@ async function playLive2dTtsBlob(
 
   const hasFollowingClip = options?.hasFollowingClip ?? false;
   releaseCurrentTtsAudio();
-  const audioUrl = URL.createObjectURL(blob);
-  ttsAudioUrl.value = audioUrl;
-  const audio = new Audio(audioUrl);
-  audio.volume = 1;
-  ttsAudio.value = audio;
 
   const live2d = await import("../avatar/spine/live2dApp.js");
-  const { buildWavEnvelopeFromBlob } = await import("../avatar/spine/spineLipSync.js");
-  const envelope =
-    options?.lipSyncEnvelope ?? (await buildWavEnvelopeFromBlob(blob));
+  const { audioBuffer, envelope } = await decodeTtsAudioFromBlob(blob);
 
   if (!isLive2dTtsSessionActive(controller, speechToken)) return;
 
@@ -363,39 +449,78 @@ async function playLive2dTtsBlob(
     live2d.playLive2dHello();
   }
 
-  live2d.bindLive2dLipSyncToAudio(audio, envelope);
   live2dSpeech.start(text, { instant: options?.instantText ?? true });
+
+  const ctx = getTtsPlaybackContext();
+  const playBuffer = appendSilenceToAudioBuffer(
+    ctx,
+    audioBuffer,
+    hasFollowingClip ? TTS_CLIP_SILENCE_MS : Math.round(TTS_CLIP_SILENCE_MS / 2),
+  );
+
   try {
-    await audio.play();
+    await playTtsAudioBuffer(playBuffer, controller.signal, {
+      onStart: (getElapsedMs) => {
+        live2d.bindLive2dLipSyncToClock(getElapsedMs, envelope);
+      },
+    });
   } catch (err) {
     live2d.stopLive2dLipSync();
     releaseCurrentTtsAudio();
     throw err;
   }
 
-  await waitForAudioNaturalEnd(audio, controller.signal);
-
-  live2d.stopLive2dLipSync();
+  if (!hasFollowingClip) {
+    live2d.stopLive2dLipSync();
+  }
   releaseCurrentTtsAudio();
   if (!isLive2dTtsSessionActive(controller, speechToken)) return;
 
   if (hasFollowingClip) {
-    live2dSpeech.finish();
     return;
   }
 
   live2dSpeech.reset();
 }
 
+function canAvatarClickToTalk(): boolean {
+  if (!props.avatarEnabled || !live2dVisible.value) return false;
+  return !store.loading && !voiceStarting.value && !speechPending.value;
+}
+
 function canLive2dHiddenVoiceStt(): boolean {
-  if (!props.avatarEnabled) return false;
-  return (
-    live2dVisible.value &&
-    !store.visible &&
-    !store.loading &&
-    !voiceStarting.value &&
-    !speechPending.value
-  );
+  return canAvatarClickToTalk() && !store.visible;
+}
+
+async function submitVoiceUtterance(text: string): Promise<void> {
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  store.prompt = trimmed;
+  voiceController.setPhase("thinking");
+  beginVoiceResponseStream();
+  const controller = ttsAbortController.value;
+  const speechToken = activeSpeechToken.value;
+  try {
+    await store.submit({
+      interactionMode: "voice",
+      onVoiceSentence: enqueueVoiceSentence,
+    });
+  } finally {
+    const stillThisTurn =
+      Boolean(controller) &&
+      isLive2dTtsSessionActive(controller!, speechToken);
+    flushHeldSpokenClip();
+    if (stillThisTurn && queuedVoiceSentences === 0) {
+      const reply = latestAssistantReply();
+      if (reply) enqueueFallbackReply(reply);
+      flushHeldSpokenClip();
+    }
+    await finishVoiceResponseStream();
+    if (stillThisTurn) {
+      voiceController.resetTo("idle");
+      live2dVoiceChannel.reset();
+    }
+  }
 }
 
 async function stopSpeechAndFillPrompt() {
@@ -414,17 +539,11 @@ async function stopSpeechAndFillPrompt() {
     if (submitAfterTranscribe) {
       sttFromLive2dVoiceChannel.value = false;
       live2dVoiceChannel.setTranscribing(false);
-      if (!trimmed) return;
-      store.prompt = trimmed;
-      beginVoiceResponseStream();
-      try {
-        await store.submit({
-          interactionMode: "voice",
-          onVoiceSentence: enqueueVoiceSentence,
-        });
-      } finally {
-        await finishVoiceResponseStream();
+      if (!trimmed) {
+        store.error = "没识别到内容，请靠近麦克风再说一次。";
+        return;
       }
+      await submitVoiceUtterance(trimmed);
       return;
     }
     const current = store.prompt.trim();
@@ -479,7 +598,7 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
 }
 
 async function startLive2dVoiceRecording(): Promise<void> {
-  if (!canLive2dHiddenVoiceStt() || voiceStarting.value) return;
+  if (!canAvatarClickToTalk() || voiceStarting.value) return;
   voiceStarting.value = true;
   try {
     stopTtsPlayback();
@@ -539,24 +658,34 @@ function showLive2dAvatar(): void {
 }
 
 function onSpotlightEscape() {
-  live2dHoldThinkingUntilSpeech.value = false;
-  activeSpeechToken.value += 1;
-  stopTtsPlayback();
-  live2dSpeech.reset();
-  if (store.showThinkingBar) {
-    store.closeThinking();
-  } else if (store.visible) {
-    store.close();
-  }
+  void voiceController.abort("escape").then(() => {
+    live2dHoldThinkingUntilSpeech.value = false;
+    activeSpeechToken.value += 1;
+    stopTtsPlayback();
+    live2dSpeech.reset();
+    if (store.showThinkingBar) {
+      store.closeThinking();
+    } else if (store.visible) {
+      store.close();
+    }
+  });
 }
 
 function onPanelVisibleChange(visible: boolean) {
-  if (!visible) {
+  if (visible) return;
+  if (
+    !shouldAbortVoiceOnPanelHide({
+      loading: store.loading,
+      pipelinePhase: store.pipelinePhase,
+    })
+  ) {
     cancelSpeechSession();
-    if (live2dVisible.value) {
-      store.prepareLive2dVoiceChannel();
-    }
     return;
+  }
+  void voiceController.abort("panel_close");
+  cancelSpeechSession();
+  if (live2dVisible.value) {
+    store.prepareLive2dVoiceChannel();
   }
 }
 
@@ -564,6 +693,7 @@ watch(live2dVisible, (on) => {
   if (!props.avatarEnabled) return;
   if (!on) {
     live2dHoldThinkingUntilSpeech.value = false;
+    void voiceController.abort("avatar_close");
     cancelSpeechSession();
     stopTtsPlayback();
     live2dSpeech.reset();
@@ -573,8 +703,30 @@ watch(live2dVisible, (on) => {
   if (!store.visible) {
     store.prepareLive2dVoiceChannel();
   }
+  void unlockVoicePlayback();
   void playLive2dGreetingWhenOpened();
 });
+
+watch(
+  () =>
+    directorPhaseFromTurn({
+      loading: store.loading,
+      speaking:
+        voiceController.phase === "speaking" || voicePlayoutHold.value,
+      toolRunning: store.agentSteps.some((step) =>
+        step.toolCalls?.some(
+          (call) => call.status === "running" || call.status === "pending",
+        ),
+      ),
+      interrupted: voiceController.phase === "interrupted",
+    }),
+  (phase) => {
+    if (voiceController.phase === "interrupted" || voiceController.phase === "error") {
+      return;
+    }
+    voiceController.setPhase(phase);
+  },
+);
 
 onMounted(() => {
   if (props.avatarEnabled && avatarConfig.initiallyVisible) {
@@ -583,6 +735,7 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  void voiceController.abort("session_end");
   cancelSpeechSession();
   stopTtsPlayback();
   live2dSpeech.reset();

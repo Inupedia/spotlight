@@ -170,8 +170,8 @@ describe("LangGraph runtime isolation", () => {
 
     expect(result.assistantReply).toContain("现场监控");
     expect(voiceSentences.length).toBeGreaterThan(0);
-    expect(phases).toContain("voice_briefing_start");
-    expect(phases).toContain("voice_briefing_done");
+    expect(phases).toContain("voice_speak_start");
+    expect(phases).toContain("voice_speak_done");
   });
 
   it("never exposes a client tool to the knowledge agent", async () => {

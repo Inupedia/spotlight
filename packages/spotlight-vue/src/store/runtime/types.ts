@@ -47,6 +47,8 @@ export type SpotlightTurnPhase =
   | "action_agent_done"
   | "voice_briefing_start"
   | "voice_briefing_done"
+  | "voice_speak_start"
+  | "voice_speak_done"
   | "query_planning"
   | "tool_execution"
   | "responding"

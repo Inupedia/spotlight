@@ -225,6 +225,7 @@ export interface SpotlightVoiceSentenceItem extends SpotlightItemBase {
   type: "voice_sentence";
   index: number;
   text: string;
+  generation?: number;
 }
 
 export interface SpotlightErrorItem extends SpotlightItemBase {

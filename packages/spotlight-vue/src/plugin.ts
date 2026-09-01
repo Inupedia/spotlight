@@ -121,7 +121,7 @@ export const SpotlightVue = {
       clientInfo: {
         name: "spotlight-vue",
         title: "Spotlight Vue",
-        version: "0.8.6",
+        version: "0.9.0",
       },
       toolManifest: () =>
         createClientToolManifest({

@@ -285,6 +285,7 @@ describe("Thread / Turn / Item lifecycle API", () => {
         .map((event) => event.item?.type);
 
       expect(itemTypes).toContain("voice_sentence");
+      expect(itemTypes).toContain("skill_use");
       expect(itemTypes.indexOf("voice_sentence")).toBeLessThan(
         itemTypes.indexOf("agent_message"),
       );

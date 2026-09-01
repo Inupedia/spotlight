@@ -15,31 +15,35 @@ export async function buildWavEnvelope(wavUrl: string): Promise<WavEnvelope> {
   return buildWavEnvelopeFromBlob(await response.blob());
 }
 
+export function wavEnvelopeFromAudioBuffer(audioBuffer: AudioBuffer): WavEnvelope {
+  const channel = audioBuffer.getChannelData(0);
+  const sampleRate = audioBuffer.sampleRate;
+  const stepSamples = Math.max(1, Math.floor((sampleRate * LIP_SYNC_STEP_MS) / 1000));
+  const levels: number[] = [];
+
+  for (let i = 0; i < channel.length; i += stepSamples) {
+    const end = Math.min(i + stepSamples, channel.length);
+    let sum = 0;
+    for (let j = i; j < end; j += 1) {
+      const s = channel[j];
+      sum += s * s;
+    }
+    levels.push(Math.sqrt(sum / (end - i)));
+  }
+
+  const peak = Math.max(...levels, 0.0001);
+  return {
+    durationMs: audioBuffer.duration * 1000,
+    levels: levels.map((v) => Math.min(1, v / peak)),
+  };
+}
+
 export async function buildWavEnvelopeFromBlob(blob: Blob): Promise<WavEnvelope> {
   const buffer = await blob.arrayBuffer();
   const ctx = new AudioContext();
   try {
     const audioBuffer = await ctx.decodeAudioData(buffer.slice(0));
-    const channel = audioBuffer.getChannelData(0);
-    const sampleRate = audioBuffer.sampleRate;
-    const stepSamples = Math.max(1, Math.floor((sampleRate * LIP_SYNC_STEP_MS) / 1000));
-    const levels: number[] = [];
-
-    for (let i = 0; i < channel.length; i += stepSamples) {
-      const end = Math.min(i + stepSamples, channel.length);
-      let sum = 0;
-      for (let j = i; j < end; j += 1) {
-        const s = channel[j];
-        sum += s * s;
-      }
-      levels.push(Math.sqrt(sum / (end - i)));
-    }
-
-    const peak = Math.max(...levels, 0.0001);
-    return {
-      durationMs: audioBuffer.duration * 1000,
-      levels: levels.map((v) => Math.min(1, v / peak)),
-    };
+    return wavEnvelopeFromAudioBuffer(audioBuffer);
   } finally {
     void ctx.close();
   }

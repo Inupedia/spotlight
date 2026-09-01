@@ -42,8 +42,10 @@ let spineUpdateWrapped = false;
 
 let isSpeaking = false;
 let lipSyncEnvelope: WavEnvelope | null = null;
-/** 口型唯一时钟：与正在播放的 TTS 音频 currentTime 绑定 */
-let lipSyncAudio: HTMLAudioElement | null = null;
+/** 口型唯一时钟：TTS 播放已过去的毫秒 */
+let lipSyncElapsedMs: (() => number) | null = null;
+let lipSyncAnalyser: AnalyserNode | null = null;
+let lipSyncAudioContext: AudioContext | null = null;
 
 function setSlotAttachment(slotName: string, attachmentName: string): void {
   if (!spine) return;
@@ -55,10 +57,22 @@ function setSlotAttachment(slotName: string, attachmentName: string): void {
 }
 
 function applyLipSyncMouth(): void {
-  if (!spine || !lipSyncEnvelope || !lipSyncAudio) return;
-  if (lipSyncAudio.ended) return;
+  if (!spine) return;
+  if (lipSyncAnalyser) {
+    const data = new Uint8Array(lipSyncAnalyser.fftSize);
+    lipSyncAnalyser.getByteTimeDomainData(data);
+    let sum = 0;
+    for (const sample of data) {
+      const centered = (sample - 128) / 128;
+      sum += centered * centered;
+    }
+    const level = Math.min(1, Math.sqrt(sum / data.length) * 4);
+    setSlotAttachment(MOUTH_SLOT, mouthAttachmentForLevel(level));
+    return;
+  }
+  if (!lipSyncEnvelope || !lipSyncElapsedMs) return;
 
-  const elapsedMs = lipSyncAudio.currentTime * 1000;
+  const elapsedMs = lipSyncElapsedMs();
   const level = envelopeLevelAt(lipSyncEnvelope, elapsedMs);
   setSlotAttachment(MOUTH_SLOT, mouthAttachmentForLevel(level));
 }
@@ -111,7 +125,8 @@ function wrapSpineUpdate(): void {
   const baseUpdate = spine.update.bind(spine);
   spine.update = (dt: number) => {
     baseUpdate(dt);
-    if (!isSpeaking || !lipSyncEnvelope || !lipSyncAudio) return;
+    if (!isSpeaking) return;
+    if (!lipSyncAnalyser && (!lipSyncEnvelope || !lipSyncElapsedMs)) return;
     applyLipSyncMouth();
     baseUpdate(0);
   };
@@ -196,17 +211,58 @@ export function stopSpineAvatar(): void {
   void Assets.reset();
 }
 
+/** 将口型与 TTS 播放时钟绑定（Web Audio 的 currentTime） */
+export function bindSpineLipSyncToClock(
+  getElapsedMs: () => number,
+  envelope: WavEnvelope,
+): void {
+  if (!spine) return;
+  stopMediaStreamLipSync();
+  lipSyncElapsedMs = getElapsedMs;
+  lipSyncEnvelope = envelope;
+  clearIdleSmileTrack();
+  isSpeaking = true;
+  spine.update(0);
+}
+
 /** 将口型与指定 audio 元素绑定（须在 play() 前后均可，以 currentTime 为准） */
 export function bindSpineLipSyncToAudio(
   audio: HTMLAudioElement,
   envelope: WavEnvelope,
 ): void {
+  bindSpineLipSyncToClock(() => audio.currentTime * 1000, envelope);
+}
+
+export function bindSpineLipSyncToMediaStream(stream: MediaStream): void {
   if (!spine) return;
-  lipSyncAudio = audio;
-  lipSyncEnvelope = envelope;
+  stopMediaStreamLipSync();
+  lipSyncElapsedMs = null;
+  lipSyncEnvelope = null;
+  const context = new AudioContext();
+  const source = context.createMediaStreamSource(stream);
+  const analyser = context.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  lipSyncAudioContext = context;
+  lipSyncAnalyser = analyser;
+  void context.resume();
   clearIdleSmileTrack();
   isSpeaking = true;
   spine.update(0);
+}
+
+export async function resumeSpineLipSyncAudio(): Promise<void> {
+  if (lipSyncAudioContext?.state === "suspended") {
+    await lipSyncAudioContext.resume();
+  }
+}
+
+function stopMediaStreamLipSync(): void {
+  lipSyncAnalyser = null;
+  if (lipSyncAudioContext) {
+    void lipSyncAudioContext.close();
+    lipSyncAudioContext = null;
+  }
 }
 
 /** 从音频 URL 解析包络并绑定（与 bindSpineLipSyncToAudio 二选一） */
@@ -221,7 +277,8 @@ export async function bindSpineLipSyncToAudioUrl(
 export function stopSpineLipSync(): void {
   isSpeaking = false;
   lipSyncEnvelope = null;
-  lipSyncAudio = null;
+  lipSyncElapsedMs = null;
+  stopMediaStreamLipSync();
   restoreIdleSmileTrack();
   spine?.update(0);
 }

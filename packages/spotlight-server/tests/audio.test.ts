@@ -17,6 +17,10 @@ describe("Spotlight audio adapter", () => {
         "## 结果\n[泸定](https://example.test) `BIM` **已打开**",
       ),
     ).toBe("结果 泸定 BIM 已打开");
+    expect(
+      normalizeSpeechText("| 阶段 | 状态 |\n| --- | --- |\n| 可研 | 进行中 |"),
+    ).toBe("阶段是可研，状态是进行中。");
+    expect(normalizeSpeechText("阶段 | 状态 | 可研")).not.toMatch(/[|｜│¦]/u);
   });
 
   it("forwards browser audio to SiliconFlow STT", async () => {
@@ -71,14 +75,21 @@ describe("Spotlight audio adapter", () => {
     expect(result.contentType).toBe("audio/mpeg");
     const request = fetchMock.mock.calls[0]![1] as RequestInit;
     expect(JSON.parse(String(request.body))).toMatchObject({
-      input: "你好，小滴",
+      input: "你好，小滴。……",
       model: "FunAudioLLM/CosyVoice2-0.5B",
     });
   });
 
   it("exposes authenticated STT/TTS routes and clear configuration errors", async () => {
-    const previousKey = process.env.SILICONFLOW_API_KEY;
-    delete process.env.SILICONFLOW_API_KEY;
+    const previous = {
+      SILICONFLOW_API_KEY: process.env.SILICONFLOW_API_KEY,
+      QWEN_API_KEY: process.env.QWEN_API_KEY,
+      DASHSCOPE_API_KEY: process.env.DASHSCOPE_API_KEY,
+      SPOTLIGHT_STT_API_KEY: process.env.SPOTLIGHT_STT_API_KEY,
+      SPOTLIGHT_TTS_API_KEY: process.env.SPOTLIGHT_TTS_API_KEY,
+      SPOTLIGHT_LLM_API_KEY: process.env.SPOTLIGHT_LLM_API_KEY,
+    };
+    for (const key of Object.keys(previous)) delete process.env[key];
     const app = await buildServer({
       runManager: {
         listServerToolNames: () => [],
@@ -108,8 +119,10 @@ describe("Spotlight audio adapter", () => {
       });
     } finally {
       await app.close();
-      if (previousKey === undefined) delete process.env.SILICONFLOW_API_KEY;
-      else process.env.SILICONFLOW_API_KEY = previousKey;
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
     }
   });
 

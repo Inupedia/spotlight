@@ -32,6 +32,7 @@ import {
   initialMessagesForRun,
 } from "./workflow/sessionContext.js";
 import { initialRuntimeState } from "./workflow/state.js";
+import { SPOKEN_BRIEFING_SKILL_NAME } from "./workflow/spokenBriefingSkill.js";
 import type { IntentRouter } from "./router.js";
 import type { SpotlightDurableState } from "./durableState.js";
 import { SpotlightPolicyEngine } from "./policy.js";
@@ -57,6 +58,7 @@ export type SpotlightServerRunEventBody =
       at: number;
       index: number;
       text: string;
+      generation?: number;
     }
   | {
       type: "run_status";
@@ -565,7 +567,11 @@ export class RunManager {
             phase,
             summary,
             matchedSkillNames:
-              phase === "router_done" ? run.matchedSkillNames : undefined,
+              phase === "router_done"
+                ? run.matchedSkillNames
+                : phase === "voice_speak_start"
+                  ? [SPOKEN_BRIEFING_SKILL_NAME]
+                  : undefined,
           }),
         onDecision: (decision: IntentDecision) => {
           run.matchedSkillNames = [...(decision.matchedSkillNames ?? [])];
@@ -602,7 +608,11 @@ export class RunManager {
             },
           });
         },
-        onVoiceSentence: (sentence: { index: number; text: string }) =>
+        onVoiceSentence: (sentence: {
+          index: number;
+          text: string;
+          generation?: number;
+        }) =>
           this.emit(run, {
             type: "voice_sentence" as const,
             at: Date.now(),

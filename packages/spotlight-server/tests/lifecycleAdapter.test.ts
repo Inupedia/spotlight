@@ -89,6 +89,30 @@ describe("SpotlightLifecycleProjector", () => {
     ]));
   });
 
+  it("surfaces the spoken-briefing runtime skill on a voice rewrite phase", () => {
+    const projector = new SpotlightLifecycleProjector("thread-1", "turn-1", 1);
+    const events = projector.project({
+      type: "turn_transition",
+      at: 4,
+      seq: 2,
+      turnId: "turn-1",
+      phase: "voice_speak_start",
+      summary: "正在把本轮结果压成口播短句。",
+      matchedSkillNames: ["skill.spoken-briefing"],
+    });
+
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        type: "item.completed",
+        item: expect.objectContaining({
+          type: "skill_use",
+          skill: "skill.spoken-briefing",
+          displayName: "口播转写",
+        }),
+      }),
+    ]));
+  });
+
   it("projects each streamed voice sentence as a stable completed Item", () => {
     const projector = new SpotlightLifecycleProjector("thread-1", "turn-1", 1);
     const events = projector.project({

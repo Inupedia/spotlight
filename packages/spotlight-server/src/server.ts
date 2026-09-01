@@ -33,6 +33,7 @@ import {
   type SpotlightSpeechInput,
   type SpotlightTranscriptionInput,
 } from "./audio.js";
+import { resolveSpeechAudioConfig } from "./voice/config.js";
 
 export const SPOTLIGHT_SERVER_VERSION = (
   JSON.parse(
@@ -195,12 +196,38 @@ export async function buildServer(options: BuildServerOptions) {
       webSearch: options.runManager.providerIds().webSearch,
     },
     serverTools: options.runManager.listServerToolNames(),
-    audio: {
-      provider: "siliconflow",
-      configured: Boolean(process.env.SILICONFLOW_API_KEY?.trim()),
-      sttModel: process.env.SILICONFLOW_STT_MODEL?.trim() || "TeleAI/TeleSpeechASR",
-      ttsModel: process.env.SILICONFLOW_TTS_MODEL?.trim() || "FunAudioLLM/CosyVoice2-0.5B",
-    },
+    audio: (() => {
+      let sttKind = "unconfigured";
+      let ttsKind = "unconfigured";
+      let sttModel = "";
+      let ttsModel = "";
+      let sttConfigured = false;
+      let ttsConfigured = false;
+      try {
+        const stt = resolveSpeechAudioConfig(process.env, "stt");
+        sttKind = stt.kind;
+        sttModel = stt.sttModel;
+        sttConfigured = true;
+      } catch {
+        // STT not configured.
+      }
+      try {
+        const tts = resolveSpeechAudioConfig(process.env, "tts");
+        ttsKind = tts.kind;
+        ttsModel = tts.ttsModel;
+        ttsConfigured = true;
+      } catch {
+        // TTS not configured.
+      }
+      return {
+        provider: sttKind === ttsKind ? sttKind : `${sttKind}+${ttsKind}`,
+        sttProvider: sttKind,
+        ttsProvider: ttsKind,
+        configured: sttConfigured && ttsConfigured,
+        sttModel,
+        ttsModel,
+      };
+    })(),
   }));
 
   app.post<{ Body: SpotlightTranscriptionInput }>(

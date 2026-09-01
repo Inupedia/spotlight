@@ -29,7 +29,7 @@ export interface SpotlightGraphOptions {
   onPhase?: (phase: string, summary: string) => void;
   onDecision?: (decision: IntentDecision) => void;
   onTool?: (event: SpotlightGraphToolEvent) => void;
-  onVoiceSentence?: (sentence: { index: number; text: string }) => void;
+  onVoiceSentence?: (sentence: { index: number; text: string; generation?: number }) => void;
 }
 
 export type WorkflowStreamEvent =

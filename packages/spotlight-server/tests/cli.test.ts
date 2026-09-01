@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveModelConfigs } from "../src/cli.js";
+import { parseCorsOrigin, resolveModelConfigs } from "../src/cli.js";
 
 describe("resolveModelConfigs", () => {
   it("uses SiliconFlow for both the agent and router by default", () => {
@@ -53,5 +53,13 @@ describe("resolveModelConfigs", () => {
       baseURL: "https://router.example/v1",
       model: "router-model",
     });
+  });
+
+  it("splits comma-separated CORS origins", () => {
+    expect(parseCorsOrigin("http://localhost:3000, http://localhost:5173")).toEqual([
+      "http://localhost:3000",
+      "http://localhost:5173",
+    ]);
+    expect(parseCorsOrigin("*")).toBe("*");
   });
 });

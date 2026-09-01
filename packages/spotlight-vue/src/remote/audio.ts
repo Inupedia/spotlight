@@ -1,3 +1,4 @@
+import { sanitizeSpokenText } from "@inupedia/spotlight-protocol";
 import { withRequestTimeout } from "../utils/requestTimeout.js";
 import {
   buildSpotlightJsonHeaders,
@@ -9,15 +10,7 @@ const STT_REQUEST_TIMEOUT_MS = 30_000;
 const TTS_REQUEST_TIMEOUT_MS = 45_000;
 
 export function normalizeSpeakText(input: string): string {
-  return input
-    .replace(/```[\s\S]*?```/g, " ")
-    .replace(/`([^`]+)`/g, "$1")
-    .replace(/\[(.*?)\]\((.*?)\)/g, "$1")
-    .replace(/[#>*_-]+/g, " ")
-    .replace(/\s+/g, " ")
-    .replace(/\s+([，。！？、；：,.!?;:])/g, "$1")
-    .trim()
-    .slice(0, 3000);
+  return sanitizeSpokenText(input).slice(0, 3000);
 }
 
 export function extractTranscriptionText(payload: unknown): string {

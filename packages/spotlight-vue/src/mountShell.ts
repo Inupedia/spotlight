@@ -4,6 +4,8 @@ import {
   type SpotlightAvatarConfig,
 } from "./avatar/config.js";
 import type { SpotlightVuePluginOptions } from "./config.js";
+import type { SpotlightVoiceConfig } from "@inupedia/spotlight-protocol";
+import { SPOTLIGHT_VOICE_CONFIG_KEY } from "./avatar/voice/config.js";
 
 let shellContainer: HTMLElement | null = null;
 
@@ -17,6 +19,8 @@ export async function mountSpotlightShell(
     ...(options.avatar ?? {}),
   };
   app.provide(SPOTLIGHT_AVATAR_CONFIG_KEY, avatarConfig);
+  const voiceConfig: SpotlightVoiceConfig = { ...(options.voice ?? {}) };
+  app.provide(SPOTLIGHT_VOICE_CONFIG_KEY, voiceConfig);
 
   const { default: SpotlightShell } = await import(
     "./components/SpotlightShell.vue"

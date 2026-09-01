@@ -80,7 +80,15 @@ export class SpotlightSpeechService {
     this.mediaStream = await navigator.mediaDevices.getUserMedia({
       audio: true,
     });
-    this.mediaRecorder = new MediaRecorder(this.mediaStream);
+    const mimeType = [
+      "audio/ogg;codecs=opus",
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+    ].find((type) => MediaRecorder.isTypeSupported(type));
+    this.mediaRecorder = mimeType
+      ? new MediaRecorder(this.mediaStream, { mimeType })
+      : new MediaRecorder(this.mediaStream);
     this.mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) this.audioChunks.push(event.data);
     };

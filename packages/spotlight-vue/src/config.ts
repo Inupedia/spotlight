@@ -85,6 +85,7 @@ export function defineSpotlightConfig(input: SpotlightConfig): SpotlightConfig {
 export const SPOTLIGHT_CONFIG_KEY = Symbol("spotlight-config");
 
 import type { SpotlightAvatarConfig } from "./avatar/config.js";
+import type { SpotlightVoiceConfig } from "@inupedia/spotlight-protocol";
 
 export type SpotlightVueUiOptions = {
   /** Mount command panel + thinking UI (default: true). */
@@ -93,6 +94,8 @@ export type SpotlightVueUiOptions = {
   avatarEnabled?: boolean;
   /** Avatar copy + Spine asset paths (when avatarEnabled). */
   avatar?: SpotlightAvatarConfig;
+  /** HTTP speech (STT/TTS). Independent of the LLM provider. */
+  voice?: SpotlightVoiceConfig;
 };
 
 /** `app.use(SpotlightVue, config)` is preferred; nested config remains source-compatible. */

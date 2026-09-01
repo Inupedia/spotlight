@@ -1,5 +1,7 @@
-FROM node:22-alpine AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY packages/spotlight-client/package.json ./packages/spotlight-client/package.json
 COPY packages/spotlight-memory/package.json ./packages/spotlight-memory/package.json
@@ -10,9 +12,11 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store corepack enable && pnpm 
 COPY packages ./packages
 RUN pnpm --filter @inupedia/spotlight-protocol build && pnpm --filter @inupedia/spotlight-memory build && pnpm --filter @inupedia/spotlight-server build
 
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 WORKDIR /app
 ENV NODE_ENV=production
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates wget \
+  && rm -rf /var/lib/apt/lists/*
 COPY --from=build /app/package.json /app/pnpm-lock.yaml /app/pnpm-workspace.yaml ./
 COPY --from=build /app/packages/spotlight-protocol ./packages/spotlight-protocol
 COPY --from=build /app/packages/spotlight-memory ./packages/spotlight-memory

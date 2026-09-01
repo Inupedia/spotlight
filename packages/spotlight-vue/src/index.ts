@@ -116,6 +116,11 @@ export { useSpotlightPanelUi } from "./composables/useSpotlightPanelUi.js";
 export { useSpotlightCommandShortcuts } from "./composables/useSpotlightCommandShortcuts.js";
 export { isGenericHostExecutionReply } from "./avatar/speech/live2dAnswerSpeechPolicy.js";
 export type { SpotlightAvatarConfig } from "./avatar/config.js";
+export {
+  VoiceTurnController,
+  type SpotlightVoiceConfig,
+  type SpotlightVoicePhase,
+} from "@inupedia/spotlight-protocol";
 
 export type { ToolResult, ToolTraceEvent } from "./types/toolResult.js";
 export type { SessionControlIntent } from "./types/session.js";

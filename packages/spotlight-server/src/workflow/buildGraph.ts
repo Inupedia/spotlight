@@ -82,7 +82,7 @@ import {
 } from "./synthesize.js";
 import type { SpotlightGraphOptions } from "./types.js";
 import { resolveGatherSources } from "../knowledgeSource.js";
-import { streamVoiceBriefing } from "./voiceBriefing.js";
+import { rewriteSpokenBriefing } from "./voiceBriefing.js";
 
 function knowledgeToolCall(
   name: string,
@@ -379,6 +379,7 @@ export function compileSpotlightWorkflow(
   // Read late, never captured: the runtime replaces this after every host call.
   const observation = () => context.observed?.() ?? context.request.uiContext;
   const observedPrompt = () => observedStatePromptBlock(observation());
+  const voiceMode = context.request.interactionMode === "voice";
 
   return new StateGraph(RuntimeState)
     .addNode("route", async (state, config) => {
@@ -543,8 +544,7 @@ export function compileSpotlightWorkflow(
         return { ...assistantUpdate(reply), invokedClientTools: [] };
       }
       const evidence = state.evidenceBundle ?? emptyEvidenceBundle();
-      const result = await options.model.invoke(
-        buildKnowledgeSynthesizeMessages({
+      const synthesizeMessages = buildKnowledgeSynthesizeMessages({
           question: state.question,
           evidence,
           sessionPrompt,
@@ -554,11 +554,10 @@ export function compileSpotlightWorkflow(
             : "The user disabled memory recall for this turn. Do not use long-term memory.",
           observedPrompt: observedPrompt(),
           messages: state.messages,
-        }),
-        config,
-      );
-      const reply =
-        finalAgentText(result) || fallbackReplyFromEvidence(evidence);
+        });
+      const result = await options.model.invoke(synthesizeMessages, config);
+      let reply = finalAgentText(result) || fallbackReplyFromEvidence(evidence);
+      reply = reply.trim() || fallbackReplyFromEvidence(evidence);
       const usedKnowledgeSkills = runSkills.filter((skill) =>
         state.decision.matchedSkillNames?.includes(skill.name),
       );
@@ -860,7 +859,7 @@ export function compileSpotlightWorkflow(
       return { ...assistantUpdate(reply), invokedClientTools: [] };
     })
     .addNode("voice_briefing", async (state, config) => {
-      if (context.request.interactionMode !== "voice") {
+      if (!voiceMode) {
         return { voiceBriefing: [] };
       }
       const answer = state.assistantReply?.trim();
@@ -868,25 +867,27 @@ export function compileSpotlightWorkflow(
       emitPhase(
         config,
         options,
-        "voice_briefing_start",
-        "正在把完整回答压缩成适合数字人口播的短句。",
+        "voice_speak_start",
+        "正在用 skill.spoken-briefing 把本轮结果压成口播短句。",
       );
-      const sentences = await streamVoiceBriefing({
+      const spokenPhrases = await rewriteSpokenBriefing({
         model: options.model,
         question: state.question,
         answer,
+        lane: state.lane,
+        invokedClientTools: state.invokedClientTools ?? [],
         config,
-        onSentence: options.onVoiceSentence,
+        onSentence: (sentence) => options.onVoiceSentence?.(sentence),
       });
       emitPhase(
         config,
         options,
-        "voice_briefing_done",
-        sentences.length > 0
-          ? `已生成 ${sentences.length} 句口播内容。`
-          : "没有生成可播报的口播内容，保留完整文字回答。",
+        "voice_speak_done",
+        spokenPhrases.length > 0
+          ? `已生成本轮口播 ${spokenPhrases.length} 句。`
+          : "没有可播报的短句，保留完整文字回答。",
       );
-      return { voiceBriefing: sentences };
+      return { voiceBriefing: spokenPhrases };
     })
     .addEdge(START, "route")
     .addConditionalEdges("route", (state) => {

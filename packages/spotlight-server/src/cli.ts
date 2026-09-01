@@ -6,11 +6,22 @@ import { LangChainIntentRouter } from "./router.js";
 import { RunManager } from "./runManager.js";
 import { buildServer } from "./server.js";
 import { SpotlightDurableState } from "./durableState.js";
+import { pathToFileURL } from "node:url";
 
 function required(env: NodeJS.ProcessEnv, name: string, fallbackName?: string): string {
   const value = env[name]?.trim() || (fallbackName ? env[fallbackName]?.trim() : "");
   if (!value) throw new Error(`${name}${fallbackName ? ` or ${fallbackName}` : ""} is required`);
   return value;
+}
+
+export function parseCorsOrigin(
+  value: string | undefined,
+): string | string[] {
+  const raw = value?.trim() || "*";
+  if (raw === "*") return "*";
+  const parts = raw.split(",").map((item) => item.trim()).filter(Boolean);
+  if (parts.length === 0) return "*";
+  return parts.length === 1 ? parts[0]! : parts;
 }
 
 export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
@@ -70,7 +81,7 @@ export async function main(): Promise<void> {
     runManager: manager,
     projectId: project.projectId,
     apiKeys: (process.env.SPOTLIGHT_API_KEYS ?? "").split(",").map((item) => item.trim()).filter(Boolean),
-    corsOrigin: process.env.CORS_ORIGIN ?? "*",
+    corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
     uiPrompts: project.uiPrompts,
     videoChannels: project.videoChannels,
     durableState,
@@ -84,7 +95,7 @@ export async function main(): Promise<void> {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   main().catch((error) => {
     console.error(error);
     process.exitCode = 1;

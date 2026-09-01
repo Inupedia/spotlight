@@ -9,6 +9,7 @@ export * from "./jsonSchema.js";
 export * from "./resources.js";
 export * from "./schema.js";
 export * from "./toolResults.js";
+export * from "./voice.js";
 
 export type ToolExecutionTarget = "runtime" | "host";
 

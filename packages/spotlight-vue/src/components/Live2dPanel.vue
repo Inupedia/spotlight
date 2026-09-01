@@ -56,8 +56,14 @@ import { useLive2dSpeechStore } from "../store/live2dSpeechStore.js";
 import { useLive2dVoiceChannelStore } from "../store/live2dVoiceChannelStore.js";
 
 const props = withDefaults(
-  defineProps<{ voiceDisabled?: boolean; voiceError?: string }>(),
-  { voiceDisabled: false, voiceError: "" },
+  defineProps<{
+    voiceDisabled?: boolean;
+    voiceError?: string;
+  }>(),
+  {
+    voiceDisabled: false,
+    voiceError: "",
+  },
 );
 const emit = defineEmits<{
   voiceStart: [];
@@ -219,11 +225,6 @@ onUnmounted(() => {
     0 0 0 8px rgba(244, 63, 94, 0.12),
     0 14px 30px rgba(225, 29, 72, 0.24);
   animation: voice-pulse 1.1s ease-in-out infinite;
-}
-
-.live2d-voice-button.is-transcribing {
-  cursor: wait;
-  color: #0f766e;
 }
 
 .live2d-voice-ring {
