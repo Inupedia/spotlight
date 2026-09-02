@@ -22,4 +22,4 @@ export * from "./tools.js";
 export * from "./yuxiInterrupts.js";
 export * from "./yuxiStreamTools.js";
 export * from "./voice/config.js";
-export * from "./voice/registry.js";
+export * from "./voiceRemote.js";

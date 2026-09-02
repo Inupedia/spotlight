@@ -1,6 +1,6 @@
 {
   "name": "@inupedia/spotlight-memory",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "description": "Optional exact and semantic answer-cache primitives for Inupedia Spotlight",
   "type": "module",
   "license": "MIT",

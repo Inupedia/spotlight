@@ -26,10 +26,105 @@
         <span class="live2d-mic-icon" aria-hidden="true" />
       </button>
       <span class="live2d-voice-label">{{ voiceButtonLabel }}</span>
-      <span v-if="voiceError" class="live2d-voice-error" role="alert">
-        {{ voiceError }}
-      </span>
+      <button
+        v-if="phonePairAvailable"
+        type="button"
+        class="live2d-phone-button"
+        :class="{ 'is-connected': phoneConnected }"
+        aria-label="用手机说话"
+        @click="emit('phonePair')"
+      >
+        用手机说话
+      </button>
     </div>
+    <Teleport to="body">
+      <div
+        v-if="phonePairOpen"
+        class="live2d-phone-overlay"
+        @click.self="emit('phonePairClose')"
+      >
+        <div
+          class="live2d-phone-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-label="手机语音遥控器"
+        >
+          <header class="live2d-phone-header">
+            <div class="live2d-phone-title-stack">
+              <span class="live2d-phone-kicker">Spotlight</span>
+              <span class="live2d-phone-title">手机遥控器</span>
+            </div>
+            <button
+              type="button"
+              class="live2d-phone-close"
+              aria-label="关闭手机二维码"
+              @click="emit('phonePairClose')"
+            >
+              ×
+            </button>
+          </header>
+          <p class="live2d-phone-hint">
+            用手机扫码打开遥控器，即可对着手机说话控制大屏。微信扫完后请选「用浏览器打开」。
+          </p>
+          <div class="live2d-phone-actions">
+            <button
+              type="button"
+              class="live2d-phone-primary"
+              :disabled="!phonePairUrl"
+              @click="openLocalPreview"
+            >
+              本机打开遥控器
+            </button>
+            <button
+              type="button"
+              class="live2d-phone-secondary"
+              :disabled="!phonePairUrl"
+              @click="copyPairUrl"
+            >
+              {{ copied ? "已复制" : "复制链接" }}
+            </button>
+          </div>
+          <div v-if="phonePairQr" class="live2d-phone-qr" v-html="phonePairQr" />
+          <p class="live2d-phone-status">
+            {{
+              phoneConnected
+                ? "手机已连接，对着遥控器说话即可"
+                : "等待遥控器连接"
+            }}
+          </p>
+        </div>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="noticeText"
+        class="live2d-notice-overlay"
+        @click.self="dismissNotice"
+      >
+        <div
+          class="live2d-notice"
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby="live2d-notice-title"
+        >
+          <header class="live2d-notice-header">
+            <div class="live2d-phone-title-stack">
+              <span class="live2d-phone-kicker">Spotlight</span>
+              <span id="live2d-notice-title" class="live2d-phone-title">提示</span>
+            </div>
+          </header>
+          <p class="live2d-notice-body">{{ noticeText }}</p>
+          <button
+            type="button"
+            class="live2d-notice-ok"
+            autofocus
+            @click="dismissNotice"
+          >
+            知道了
+          </button>
+        </div>
+      </div>
+    </Teleport>
     <Transition name="speech-bubble">
       <div
         v-if="speechVisible"
@@ -59,16 +154,32 @@ const props = withDefaults(
   defineProps<{
     voiceDisabled?: boolean;
     voiceError?: string;
+    phonePairAvailable?: boolean;
+    phonePairOpen?: boolean;
+    phonePairQr?: string;
+    phonePairUrl?: string;
+    phonePairError?: string;
+    phoneConnected?: boolean;
   }>(),
   {
     voiceDisabled: false,
     voiceError: "",
+    phonePairAvailable: false,
+    phonePairOpen: false,
+    phonePairQr: "",
+    phonePairUrl: "",
+    phonePairError: "",
+    phoneConnected: false,
   },
 );
 const emit = defineEmits<{
   voiceStart: [];
   voiceStop: [];
   close: [];
+  phonePair: [];
+  phonePairClose: [];
+  dismissError: [];
+  dismissPairError: [];
 }>();
 
 const speechStore = useLive2dSpeechStore();
@@ -76,7 +187,13 @@ const voiceChannel = useLive2dVoiceChannelStore();
 const avatarConfig = useSpotlightAvatarConfig();
 const { message, speaking, revealInstant } = storeToRefs(speechStore);
 const animatedText = ref("");
+const copied = ref(false);
 let typingTimer: number | null = null;
+let copiedTimer: number | null = null;
+
+const noticeText = computed(
+  () => props.voiceError.trim() || props.phonePairError.trim(),
+);
 
 const speechVisible = computed(() => {
   return speaking.value || message.value.trim().length > 0;
@@ -93,6 +210,30 @@ function onVoiceClick(event: MouseEvent): void {
   event.preventDefault();
   if (voiceChannel.recording) emit("voiceStop");
   else emit("voiceStart");
+}
+
+function dismissNotice(): void {
+  if (props.voiceError.trim()) emit("dismissError");
+  else emit("dismissPairError");
+}
+
+function openLocalPreview(): void {
+  if (!props.phonePairUrl) return;
+  window.open(props.phonePairUrl, "spotlight-voice-remote");
+}
+
+async function copyPairUrl(): Promise<void> {
+  if (!props.phonePairUrl) return;
+  try {
+    await navigator.clipboard.writeText(props.phonePairUrl);
+    copied.value = true;
+    if (copiedTimer != null) window.clearTimeout(copiedTimer);
+    copiedTimer = window.setTimeout(() => {
+      copied.value = false;
+    }, 1600);
+  } catch {
+    window.prompt("复制遥控器链接", props.phonePairUrl);
+  }
 }
 
 function clearTypingTimer() {
@@ -137,6 +278,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   clearTypingTimer();
+  if (copiedTimer != null) window.clearTimeout(copiedTimer);
   speechStore.reset();
   stopLive2dApp();
 });
@@ -304,19 +446,221 @@ onUnmounted(() => {
   box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
 }
 
-.live2d-voice-error {
-  width: min(280px, 64vw);
-  padding: 7px 10px;
-  border: 1px solid rgba(244, 63, 94, 0.32);
-  border-radius: 10px;
-  background: rgba(255, 241, 242, 0.96);
-  color: #be123c;
+.live2d-phone-button {
+  margin-top: 2px;
+  padding: 6px 12px;
+  border: 1px solid rgba(20, 184, 166, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  color: #0f766e;
   font-size: 12px;
-  line-height: 1.45;
-  max-height: 72px;
+  font-weight: 600;
+  line-height: 1.2;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+}
+
+.live2d-phone-button.is-connected {
+  border-color: rgba(16, 185, 129, 0.42);
+  background: rgba(236, 253, 245, 0.94);
+  color: #047857;
+}
+
+.live2d-phone-overlay,
+.live2d-notice-overlay {
+  --tb-text: #0f172a;
+  --tb-text-muted: #64748b;
+  --tb-border: rgba(148, 163, 184, 0.28);
+  --tb-font:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", system-ui, sans-serif;
+  position: fixed;
+  inset: 0;
+  z-index: 6200;
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top))
+    max(16px, env(safe-area-inset-right))
+    max(16px, env(safe-area-inset-bottom))
+    max(16px, env(safe-area-inset-left));
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(10px) saturate(1.2);
+  -webkit-backdrop-filter: blur(10px) saturate(1.2);
+  pointer-events: auto;
+  font-family: var(--tb-font);
+}
+
+.live2d-notice-overlay {
+  z-index: 6300;
+}
+
+.live2d-phone-panel,
+.live2d-notice {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  width: min(380px, calc(100vw - 32px));
+  max-height: min(88vh, 720px);
   overflow: auto;
+  padding: 0 0 16px;
+  border: 1px solid var(--tb-border);
+  border-radius: 22px;
+  background: linear-gradient(
+    165deg,
+    rgba(255, 255, 255, 0.96) 0%,
+    rgba(248, 250, 252, 0.94) 55%,
+    rgba(240, 253, 250, 0.92) 100%
+  );
+  box-shadow:
+    0 24px 64px rgba(15, 23, 42, 0.16),
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  color: var(--tb-text);
+}
+
+.live2d-notice {
+  width: min(360px, calc(100vw - 32px));
+  max-height: min(70vh, 420px);
+}
+
+.live2d-phone-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 14px 0 16px;
+}
+
+.live2d-phone-title-stack {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.live2d-phone-kicker {
+  color: var(--tb-text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.live2d-phone-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.35;
+}
+
+.live2d-phone-close {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--tb-border);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--tb-text-muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.live2d-phone-hint {
+  margin: 0;
+  padding: 0 16px;
+  color: #475569;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.live2d-phone-actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  padding: 0 16px;
+}
+
+.live2d-phone-primary,
+.live2d-phone-secondary {
+  min-height: 36px;
+  border: 0;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.live2d-phone-primary {
+  background: linear-gradient(135deg, #14b8a6, #0ea5e9);
+  color: #fff;
+}
+
+.live2d-phone-secondary {
+  padding: 0 14px;
+  border: 1px solid var(--tb-border);
+  background: rgba(255, 255, 255, 0.88);
+  color: #334155;
+}
+
+.live2d-phone-primary:disabled,
+.live2d-phone-secondary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.live2d-phone-qr {
+  display: grid;
+  place-items: center;
+  margin: 0 16px;
+  padding: 10px;
+  border: 1px solid var(--tb-border);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.live2d-phone-qr :deep(svg) {
+  width: min(196px, 58vw);
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.live2d-phone-status {
+  margin: 0;
+  padding: 0 16px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 600;
   text-align: center;
-  box-shadow: 0 8px 18px rgba(159, 18, 57, 0.12);
+}
+
+.live2d-notice-header {
+  padding: 14px 16px 0;
+}
+
+.live2d-notice-body {
+  margin: 0;
+  padding: 0 16px;
+  color: #334155;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.live2d-notice-ok {
+  min-height: 40px;
+  margin: 4px 16px 0;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #14b8a6, #0ea5e9);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+@media (max-width: 720px) {
+  .live2d-phone-actions {
+    grid-template-columns: 1fr;
+  }
 }
 
 .live2d-speech-bubble {

@@ -15,8 +15,18 @@
     v-if="avatarEnabled && live2dVisible"
     :voice-disabled="store.loading || speechPending || voiceStarting"
     :voice-error="store.error"
+    :phone-pair-available="phonePair.canShow.value"
+    :phone-pair-open="phonePair.panelOpen.value"
+    :phone-pair-qr="phonePair.qrSvg.value"
+    :phone-pair-url="phonePair.pairUrl.value"
+    :phone-pair-error="phonePair.pairError.value"
+    :phone-connected="phonePair.phoneConnected.value"
     @voice-start="startLive2dVoiceRecording"
     @voice-stop="stopLive2dVoiceRecording"
+    @phone-pair="phonePair.openPanel"
+    @phone-pair-close="phonePair.closePanel"
+    @dismiss-error="store.error = ''"
+    @dismiss-pair-error="phonePair.clearPairError"
     @close="live2dOverlay.hide"
   />
   <button
@@ -58,6 +68,8 @@ import { useSpotlightAvatarConfig } from "../avatar/config.js";
 import { unlockVoicePlayback } from "../avatar/voice/voiceSession.js";
 import { shouldAbortVoiceOnPanelHide } from "../avatar/voice/panelHidePolicy.js";
 import { directorPhaseFromTurn } from "../avatar/voice/avatarDirector.js";
+import { microphoneAccessMessage } from "../avatar/voice/micAccess.js";
+import { usePhoneVoicePairing } from "../avatar/voice/usePhoneVoicePairing.js";
 import { useAgentSessionStore } from "../session/agentSession.js";
 import SpotlightRoot from "./SpotlightRoot.vue";
 import Live2dPanel from "./Live2dPanel.vue";
@@ -523,6 +535,11 @@ async function submitVoiceUtterance(text: string): Promise<void> {
   }
 }
 
+const phonePair = usePhoneVoicePairing({
+  enabled: props.avatarEnabled,
+  onUtterance: submitVoiceUtterance,
+});
+
 async function stopSpeechAndFillPrompt() {
   if (speechPending.value) return;
   const submitAfterTranscribe = sttFromLive2dVoiceChannel.value;
@@ -550,9 +567,7 @@ async function stopSpeechAndFillPrompt() {
     store.prompt = current ? `${current} ${text}` : text;
   } catch (err) {
     if (controller.signal.aborted) return;
-    const message =
-      err instanceof Error ? err.message : "语音识别失败，请重试。";
-    store.error = message;
+    store.error = microphoneAccessMessage(err) || "语音识别失败，请重试。";
   } finally {
     speechAbortController.value = null;
     speechPending.value = false;
@@ -588,8 +603,7 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
       }
       store.error = "";
     } catch (err) {
-      const message = err instanceof Error ? err.message : "无法启动语音录制。";
-      store.error = message;
+      store.error = microphoneAccessMessage(err);
       voiceHoldActive.value = false;
       sttFromLive2dVoiceChannel.value = false;
       live2dVoiceChannel.reset();
@@ -612,8 +626,7 @@ async function startLive2dVoiceRecording(): Promise<void> {
     live2dVoiceChannel.setRecording(true);
     store.error = "";
   } catch (err) {
-    const message = err instanceof Error ? err.message : "无法启动语音录制。";
-    store.error = message;
+    store.error = microphoneAccessMessage(err);
     voiceHoldActive.value = false;
     sttFromLive2dVoiceChannel.value = false;
     live2dVoiceChannel.reset();
@@ -731,6 +744,9 @@ watch(
 onMounted(() => {
   if (props.avatarEnabled && avatarConfig.initiallyVisible) {
     live2dOverlay.show();
+  }
+  if (props.avatarEnabled) {
+    phonePair.startPolling();
   }
 });
 

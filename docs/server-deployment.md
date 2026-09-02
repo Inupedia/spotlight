@@ -1,4 +1,4 @@
-# Spotlight Server 0.9.0 部署与 Project Pack
+# Spotlight Server 0.9.1 部署与 Project Pack
 
 ## 结论
 
@@ -13,7 +13,7 @@
 ```yaml
 services:
   spotlight-server:
-    image: ghcr.io/inupedia/spotlight-server:0.9.0
+    image: ghcr.io/inupedia/spotlight-server:0.9.1
     ports: ["8787:8787"]
     env_file: .env
     environment:

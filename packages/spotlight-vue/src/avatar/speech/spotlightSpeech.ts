@@ -3,6 +3,7 @@ import {
   spotlightSynthesizeSpeech,
   spotlightTranscribeAudio,
 } from "../../remote/audio.js";
+import { getMicrophoneStream } from "../voice/micAccess.js";
 
 const STT_MOCK_FALLBACK_TEXT = "请介绍一下引大济岷项目";
 
@@ -39,20 +40,6 @@ async function blobToBase64(blob: Blob): Promise<string> {
   return btoa(binary);
 }
 
-function assertBrowserSupport(): void {
-  if (typeof window !== "undefined" && window.isSecureContext === false) {
-    throw new Error(
-      "语音输入需要 HTTPS 或 localhost 安全环境，当前页面无法访问麦克风。",
-    );
-  }
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error("当前浏览器不支持麦克风采集。");
-  }
-  if (typeof MediaRecorder === "undefined") {
-    throw new Error("当前浏览器不支持 MediaRecorder。");
-  }
-}
-
 /** 浏览器侧录音 + mock；STT/TTS HTTP 见 `@inupedia/spotlight-vue`。 */
 export class SpotlightSpeechService {
   private mediaRecorder: MediaRecorder | null = null;
@@ -75,11 +62,8 @@ export class SpotlightSpeechService {
       return;
     }
     if (this.isRecording) return;
-    assertBrowserSupport();
     this.audioChunks = [];
-    this.mediaStream = await navigator.mediaDevices.getUserMedia({
-      audio: true,
-    });
+    this.mediaStream = await getMicrophoneStream();
     const mimeType = [
       "audio/ogg;codecs=opus",
       "audio/webm;codecs=opus",

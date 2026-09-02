@@ -11,6 +11,7 @@ const bundledDeps = new Set([
 ]);
 
 function isExternal(id: string): boolean {
+  if (id === "uqr" || id.startsWith("uqr/")) return false;
   if (id.startsWith(".") || id.startsWith("/") || id.startsWith("\0")) {
     return false;
   }

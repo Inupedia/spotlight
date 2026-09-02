@@ -32,8 +32,13 @@ import {
   transcribeSpotlightAudio,
   type SpotlightSpeechInput,
   type SpotlightTranscriptionInput,
+  extractTranscriptionText,
 } from "./audio.js";
 import { resolveSpeechAudioConfig } from "./voice/config.js";
+import {
+  VoiceRemoteRegistry,
+  isVoiceRemotePublicPath,
+} from "./voiceRemote.js";
 
 export const SPOTLIGHT_SERVER_VERSION = (
   JSON.parse(
@@ -148,8 +153,12 @@ export async function buildServer(options: BuildServerOptions) {
       "Last-Event-ID",
     ],
   });
+  const voiceRemote = new VoiceRemoteRegistry();
+
   app.addHook("preHandler", async (request, reply) => {
-    if (request.url === "/health" || !options.apiKeys?.length) return;
+    const path = request.url.split("?")[0] ?? request.url;
+    if (path === "/health" || !options.apiKeys?.length) return;
+    if (isVoiceRemotePublicPath(path)) return;
     const direct = request.headers["x-spotlight-api-key"];
     const authorization = request.headers.authorization;
     const supplied =
@@ -159,7 +168,7 @@ export async function buildServer(options: BuildServerOptions) {
           ? authorization.slice(7)
           : undefined;
     if (!supplied || !options.apiKeys.includes(supplied)) {
-      await reply
+      return reply
         .status(401)
         .send({ error: { code: "UNAUTHORIZED", message: "Invalid API key" } });
     }
@@ -235,6 +244,93 @@ export async function buildServer(options: BuildServerOptions) {
     async (request, reply) => {
       try {
         return await transcribeSpotlightAudio(request.body, process.env, request.signal);
+      } catch (error) {
+        if (error instanceof SpotlightAudioError) {
+          return reply.status(error.statusCode).send({
+            error: { code: error.code, message: error.message },
+          });
+        }
+        throw error;
+      }
+    },
+  );
+
+  app.post("/v1/voice-remote/sessions", async () => {
+    const created = voiceRemote.create(options.projectId);
+    return {
+      token: created.token,
+      expiresAt: created.expiresAt,
+      projectId: options.projectId,
+    };
+  });
+
+  app.get<{ Params: { token: string } }>(
+    "/v1/voice-remote/sessions/:token",
+    async (request, reply) => {
+      const view = voiceRemote.publicView(request.params.token);
+      if (!view) {
+        return reply.status(404).send({
+          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+        });
+      }
+      return view;
+    },
+  );
+
+  app.post<{ Params: { token: string } }>(
+    "/v1/voice-remote/sessions/:token/heartbeat",
+    async (request, reply) => {
+      const session = voiceRemote.touchPhone(request.params.token);
+      if (!session) {
+        return reply.status(404).send({
+          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+        });
+      }
+      return voiceRemote.publicView(request.params.token);
+    },
+  );
+
+  app.get<{ Params: { token: string } }>(
+    "/v1/voice-remote/sessions/:token/pending",
+    async (request, reply) => {
+      if (!voiceRemote.get(request.params.token)) {
+        return reply.status(404).send({
+          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+        });
+      }
+      return { utterances: voiceRemote.takePending(request.params.token) };
+    },
+  );
+
+  app.post<{
+    Params: { token: string };
+    Body: SpotlightTranscriptionInput & { text?: string };
+  }>(
+    "/v1/voice-remote/sessions/:token/utterance",
+    async (request, reply) => {
+      if (!voiceRemote.get(request.params.token)) {
+        return reply.status(404).send({
+          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+        });
+      }
+      try {
+        const typed = request.body?.text?.trim();
+        let text = typed ?? "";
+        if (!text) {
+          const raw = await transcribeSpotlightAudio(
+            request.body,
+            process.env,
+            request.signal,
+          );
+          text = extractTranscriptionText(raw);
+        }
+        const utterance = voiceRemote.enqueue(request.params.token, text);
+        if (!utterance) {
+          return reply.status(400).send({
+            error: { code: "EMPTY_UTTERANCE", message: "没识别到内容，请再说一次。" },
+          });
+        }
+        return { ok: true, text: utterance.text, id: utterance.id };
       } catch (error) {
         if (error instanceof SpotlightAudioError) {
           return reply.status(error.statusCode).send({
