@@ -171,6 +171,11 @@ export interface RunManagerOptions {
   project: ProjectPack;
   model: BaseChatModel;
   router: IntentRouter;
+  /** Create request-scoped models for a frontend-selected model. */
+  modelsForRun?: (modelId: string) => {
+    model: BaseChatModel;
+    router: IntentRouter;
+  };
   checkpointer: BaseCheckpointSaver;
   store: BaseStore;
   /** Budget for a host call while a browser is attached. */
@@ -559,6 +564,9 @@ export class RunManager {
       };
       const graphOptions = {
         ...this.options,
+        ...(run.request.model && this.options.modelsForRun
+          ? this.options.modelsForRun(run.request.model)
+          : {}),
         onPhase: (phase: string, summary: string) =>
           this.emit(run, {
             type: "turn_transition" as const,

@@ -11,9 +11,9 @@
   -webkit-backdrop-filter: blur(18px) saturate(1.15);
   z-index: 9999;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  padding-top: 12vh;
+  padding: 24px;
   transition:
     background 0.28s ease,
     backdrop-filter 0.28s ease;
@@ -22,10 +22,10 @@
 .spotlight-panel {
   position: fixed;
   left: 50%;
-  top: 12vh;
-  transform: translate(-50%, 0);
-  width: min(680px, calc(100% - 40px));
-  max-height: 82vh;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 48px));
+  max-height: min(82dvh, 760px);
   overflow: hidden;
   font-family:
     -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
@@ -290,6 +290,414 @@
   letter-spacing: -0.01em;
 }
 
+.spotlight-command-deck-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 3;
+}
+
+.spotlight-model-settings {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  color: #64748b;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
+}
+
+.spotlight-model-settings svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.65;
+}
+
+.spotlight-model-settings:hover {
+  border-color: rgba(100, 116, 139, 0.18);
+  color: #1769c2;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.spotlight-model-settings:active {
+  transform: scale(0.95);
+}
+
+.spotlight-model-settings:focus-visible,
+.spotlight-model-dialog button:focus-visible,
+.spotlight-model-search:focus-within {
+  outline: 3px solid rgba(37, 99, 235, 0.3);
+  outline-offset: 2px;
+}
+
+.spotlight-model-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(80dvh, 760px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  border-radius: 24px;
+  color: #1e293b;
+  background: rgba(249, 250, 252, 0.96);
+  box-shadow:
+    0 30px 90px rgba(15, 23, 42, 0.24),
+    0 8px 28px rgba(15, 23, 42, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+  backdrop-filter: blur(28px) saturate(1.35);
+  -webkit-backdrop-filter: blur(28px) saturate(1.35);
+  font-family:
+    -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
+    "Helvetica Neue", system-ui, sans-serif;
+}
+
+.spotlight-model-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+.spotlight-model-dialog-content {
+  display: flex;
+  flex-direction: column;
+  max-height: min(80dvh, 760px);
+  min-height: 0;
+}
+
+.spotlight-model-dialog-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 22px 24px 16px;
+}
+
+.spotlight-model-dialog-heading {
+  min-width: 0;
+}
+
+.spotlight-model-dialog-eyebrow {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.spotlight-model-dialog-header h2 {
+  margin: 5px 0 4px;
+  color: #172033;
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.035em;
+  line-height: 1.25;
+}
+
+.spotlight-model-dialog-header p {
+  margin: 0;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.spotlight-model-dialog-close {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  border-radius: 12px;
+  color: #475569;
+  background: rgba(255, 255, 255, 0.76);
+  font-size: 23px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.spotlight-model-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin: 0 20px 12px;
+  padding: 0 13px;
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  border-radius: 13px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.spotlight-model-search-icon {
+  font-size: 20px;
+  line-height: 1;
+}
+
+.spotlight-model-search input {
+  flex: 1;
+  min-width: 0;
+  height: 40px;
+  border: 0;
+  outline: 0;
+  color: #1e293b;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+}
+
+.spotlight-model-search input::placeholder {
+  color: #94a3b8;
+}
+
+.spotlight-model-dialog-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 34px;
+  padding: 0 22px;
+  color: #64748b;
+  font-size: 12px;
+}
+
+.spotlight-model-dialog-status > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spotlight-model-dialog-status .is-error {
+  color: #b42318;
+}
+
+.spotlight-model-refresh {
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 8px;
+  color: #1769c2;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.spotlight-model-refresh:hover:not(:disabled) {
+  background: rgba(37, 99, 235, 0.08);
+}
+
+.spotlight-model-refresh:disabled {
+  color: #94a3b8;
+  cursor: wait;
+}
+
+.spotlight-model-results {
+  min-height: 96px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 2px 14px 12px;
+  scrollbar-color: rgba(100, 116, 139, 0.42) transparent;
+  scrollbar-width: thin;
+}
+
+.spotlight-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  min-height: 58px;
+  padding: 9px 12px;
+  border: 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 10px;
+  color: #1e293b;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.spotlight-model-option:hover {
+  background: rgba(241, 245, 249, 0.9);
+}
+
+.spotlight-model-option.is-selected {
+  background: rgba(222, 237, 255, 0.82);
+}
+
+.spotlight-model-option-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.spotlight-model-option-name {
+  overflow: hidden;
+  color: #1e293b;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spotlight-model-option-provider {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.spotlight-model-option-check {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  color: #fff;
+  background: #1769c2;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.spotlight-model-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 28px 16px;
+  color: #64748b;
+  font-size: 12px;
+  text-align: center;
+}
+
+.spotlight-model-empty strong {
+  color: #334155;
+  font-size: 14px;
+}
+
+.spotlight-model-dialog-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px;
+  border-top: 1px solid rgba(148, 163, 184, 0.2);
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.48);
+  font-size: 11px;
+}
+
+.spotlight-model-done {
+  flex: 0 0 auto;
+  min-width: 88px;
+  min-height: 38px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 11px;
+  color: #fff;
+  background: #1769c2;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 650;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(23, 105, 194, 0.2);
+}
+
+.spotlight-model-done:hover {
+  background: #105ba9;
+}
+
+.spotlight-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 560px) {
+  .spotlight-command-deck-meta {
+    gap: 6px;
+  }
+
+  .spotlight-command-deck-kicker {
+    display: none;
+  }
+}
+
+@media (max-width: 480px), (max-height: 540px) {
+  .spotlight-model-dialog {
+    width: 100vw;
+    max-height: 100dvh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .spotlight-model-dialog-content {
+    max-height: 100dvh;
+  }
+
+  .spotlight-model-dialog-header {
+    padding: 16px 18px 12px;
+  }
+
+  .spotlight-model-search {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .spotlight-model-settings,
+  .spotlight-model-dialog,
+  .spotlight-model-search,
+  .spotlight-model-dialog-footer {
+    background: #f8fafc;
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .spotlight-model-dialog::backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+@media (prefers-contrast: more) {
+  .spotlight-model-settings,
+  .spotlight-model-dialog,
+  .spotlight-model-search {
+    border-color: #64748b;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-model-settings {
+    transition: none;
+  }
+}
+
 .spotlight-memory-dot-btn {
   display: inline-flex;
   align-items: center;
@@ -383,7 +791,7 @@
   margin: 0;
   padding: 6px;
   list-style: none;
-  max-height: min(54vh, 480px);
+  max-height: min(48dvh, 430px);
   overflow: auto;
   border-radius: 14px;
   border: 1px solid rgba(148, 163, 184, 0.2);
@@ -486,8 +894,9 @@
 
 @media (max-width: 768px) {
   .spotlight-panel {
-    width: calc(100% - 24px);
-    top: 8vh;
+    width: calc(100vw - 24px);
+    top: 50%;
+    max-height: min(88dvh, 760px);
     padding: 14px;
   }
 

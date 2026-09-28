@@ -1,10 +1,14 @@
 <template>
-  <div class="spotlight-backdrop" @click.self="store.close">
+  <div
+    class="spotlight-backdrop"
+    :inert="modelPickerOpen"
+    @click.self="store.close"
+  >
     <div
       class="spotlight-panel"
       :class="{ 'is-memory-on': memoryPreference.enabled }"
       role="dialog"
-      aria-modal="true"
+      :aria-modal="modelPickerOpen ? 'false' : 'true'"
       aria-label="指令面板"
     >
       <OfficialBorderBeam
@@ -23,27 +27,42 @@
           }}</span>
           <span class="spotlight-command-deck-status">{{ badgeLabel }}</span>
         </div>
-        <button
-          type="button"
-          class="spotlight-memory-dot-btn"
-          role="switch"
-          :aria-checked="memoryPreference.enabled"
-          :aria-label="
-            getSpotlightMemoryPreferenceCopy(memoryPreference.enabled).ariaLabel
-          "
-          :title="
-            getSpotlightMemoryPreferenceCopy(memoryPreference.enabled).title
-          "
-          @click="memoryPreference.toggle()"
-        >
-          <span class="spotlight-memory-label">{{
-            SPOTLIGHT_MEMORY_PREFERENCE_LABEL
-          }}</span>
-          <span
-            class="spotlight-memory-dot"
-            :class="{ 'is-on': memoryPreference.enabled }"
-          />
-        </button>
+        <div class="spotlight-command-deck-actions">
+          <button
+            type="button"
+            class="spotlight-memory-dot-btn"
+            role="switch"
+            :aria-checked="memoryPreference.enabled"
+            :aria-label="
+              getSpotlightMemoryPreferenceCopy(memoryPreference.enabled).ariaLabel
+            "
+            :title="
+              getSpotlightMemoryPreferenceCopy(memoryPreference.enabled).title
+            "
+            @click="memoryPreference.toggle()"
+          >
+            <span class="spotlight-memory-label">{{
+              SPOTLIGHT_MEMORY_PREFERENCE_LABEL
+            }}</span>
+            <span
+              class="spotlight-memory-dot"
+              :class="{ 'is-on': memoryPreference.enabled }"
+            />
+          </button>
+          <button
+            ref="modelTriggerRef"
+            type="button"
+            class="spotlight-model-settings"
+            aria-haspopup="dialog"
+            :aria-expanded="modelPickerOpen"
+            aria-controls="spotlight-model-dialog"
+            :aria-label="modelPreference.selectedModel ? `模型设置，当前 ${modelPreference.selectedModel}` : '模型设置'"
+            :title="modelPreference.error || '模型设置'"
+            @click="openModelPicker"
+          >
+            <Settings2 :size="17" :stroke-width="1.8" aria-hidden="true" />
+          </button>
+        </div>
       </div>
       <div
         v-if="store.pendingSkillPermission"
@@ -190,13 +209,123 @@
       </div>
     </div>
   </div>
+  <Teleport to="body">
+    <dialog
+      id="spotlight-model-dialog"
+      ref="modelDialogRef"
+      class="spotlight-model-dialog"
+      aria-labelledby="spotlight-model-title"
+      aria-describedby="spotlight-model-description"
+      @cancel.prevent="closeModelPicker"
+      @click.self="closeModelPicker"
+      @close="modelPickerOpen = false"
+    >
+      <section class="spotlight-model-dialog-content">
+        <header class="spotlight-model-dialog-header">
+          <div class="spotlight-model-dialog-heading">
+            <span class="spotlight-model-dialog-eyebrow">SPOTLIGHT 设置</span>
+            <h2 id="spotlight-model-title">选择模型</h2>
+            <p id="spotlight-model-description">
+              选择后将用于接下来的 Spotlight 请求。
+            </p>
+          </div>
+          <button
+            type="button"
+            class="spotlight-model-dialog-close"
+            aria-label="关闭模型选择"
+            @click="closeModelPicker"
+          >
+            <span aria-hidden="true">×</span>
+          </button>
+        </header>
+
+        <label class="spotlight-model-search">
+          <span class="spotlight-model-search-icon" aria-hidden="true">⌕</span>
+          <span class="spotlight-sr-only">搜索模型</span>
+          <input
+            id="spotlight-model-search"
+            ref="modelSearchRef"
+            v-model="modelSearch"
+            type="search"
+            autocomplete="off"
+            placeholder="搜索模型名称"
+          >
+        </label>
+
+        <div class="spotlight-model-dialog-status" aria-live="polite">
+          <span v-if="modelPreference.loading">正在同步模型列表…</span>
+          <span v-else-if="modelPreference.error" class="is-error">
+            {{ modelPreference.error }}
+          </span>
+          <span v-else-if="filteredModels.length">
+            {{ filteredModels.length }} 个可用模型
+          </span>
+          <span v-else>没有找到匹配的模型</span>
+          <button
+            type="button"
+            class="spotlight-model-refresh"
+            :disabled="modelPreference.loading"
+            @click="modelPreference.loadModels(true)"
+          >
+            {{ modelPreference.loading ? '同步中…' : '刷新列表' }}
+          </button>
+        </div>
+
+        <div class="spotlight-model-results" aria-label="可用模型">
+          <button
+            v-for="model in filteredModels"
+            :key="model.id"
+            type="button"
+            class="spotlight-model-option"
+            :class="{ 'is-selected': model.id === modelPreference.selectedModel }"
+            :aria-pressed="model.id === modelPreference.selectedModel"
+            @click="selectModel(model.id)"
+          >
+            <span class="spotlight-model-option-copy">
+              <span class="spotlight-model-option-name">{{ model.id }}</span>
+              <span class="spotlight-model-option-provider">
+                {{ model.ownedBy || 'SiliconFlow' }}
+              </span>
+            </span>
+            <span
+              v-if="model.id === modelPreference.selectedModel"
+              class="spotlight-model-option-check"
+              aria-hidden="true"
+            >
+              ✓
+            </span>
+          </button>
+          <div
+            v-if="!modelPreference.loading && modelPreference.models.length === 0"
+            class="spotlight-model-empty"
+          >
+            <strong>暂时无法获取模型</strong>
+            <span>请检查 Spotlight Server 与模型服务商连接后重试。</span>
+          </div>
+        </div>
+
+        <footer class="spotlight-model-dialog-footer">
+          <span>当前选择会保存在此项目的浏览器中。</span>
+          <button
+            type="button"
+            class="spotlight-model-done"
+            @click="closeModelPicker"
+          >
+            完成
+          </button>
+        </footer>
+      </section>
+    </dialog>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { nextTick, ref, toRef } from "vue";
+import { computed, nextTick, onMounted, ref, toRef } from "vue";
+import { Settings2 } from "lucide-vue-next";
 import { storeToRefs } from "pinia";
 import { useSpotlightStore } from "../store/spotlightStore.js";
 import { useSpotlightMemoryPreferenceStore } from "../store/memoryPreferenceStore.js";
+import { useSpotlightModelStore } from "../store/modelStore.js";
 import {
   getSpotlightMemoryPreferenceCopy,
   SPOTLIGHT_MEMORY_PREFERENCE_LABEL,
@@ -222,9 +351,47 @@ const props = withDefaults(
 
 const store = useSpotlightStore();
 const memoryPreference = useSpotlightMemoryPreferenceStore();
+const modelPreference = useSpotlightModelStore();
 const { loading, pipelinePhase, lastMemoryReplay, lastMemoryDecision } =
   storeToRefs(store);
 const inputRef = ref<HTMLInputElement | null>(null);
+const modelPickerOpen = ref(false);
+const modelSearch = ref("");
+const modelDialogRef = ref<HTMLDialogElement | null>(null);
+const modelSearchRef = ref<HTMLInputElement | null>(null);
+const modelTriggerRef = ref<HTMLButtonElement | null>(null);
+const filteredModels = computed(() => {
+  const query = modelSearch.value.trim().toLocaleLowerCase();
+  if (!query) return modelPreference.models;
+  return modelPreference.models.filter((model) =>
+    model.id.toLocaleLowerCase().includes(query),
+  );
+});
+
+onMounted(() => {
+  void modelPreference.loadModels();
+});
+
+function openModelPicker() {
+  const dialog = modelDialogRef.value;
+  if (!dialog || dialog.open) return;
+  modelPickerOpen.value = true;
+  modelSearch.value = "";
+  dialog.showModal();
+  void nextTick(() => modelSearchRef.value?.focus());
+}
+
+function closeModelPicker() {
+  const dialog = modelDialogRef.value;
+  if (dialog?.open) dialog.close();
+  modelPickerOpen.value = false;
+  void nextTick(() => modelTriggerRef.value?.focus());
+}
+
+function selectModel(modelId: string) {
+  modelPreference.selectModel(modelId);
+  closeModelPicker();
+}
 
 const { uiState, placeholder, badgeLabel } = useSpotlightPanelUi({
   pipelinePhase,

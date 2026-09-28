@@ -19,6 +19,7 @@ import {
   deriveToolTier,
 } from "@inupedia/spotlight-protocol";
 import type { RunManager } from "./runManager.js";
+import type { SpotlightModelCatalogEntry } from "./model.js";
 import { SpotlightLifecycleProjector } from "./lifecycleAdapter.js";
 import { SpotlightDurableState } from "./durableState.js";
 import type { SpotlightServerRunEvent } from "./runManager.js";
@@ -55,6 +56,8 @@ export interface BuildServerOptions {
   videoChannels?: Array<{ id: string; name: string; aliases: string[] }>;
   durableState?: SpotlightDurableState;
   capabilitySessionTtlMs?: number;
+  modelCatalog?: () => Promise<SpotlightModelCatalogEntry[]>;
+  defaultModel?: string;
 }
 
 function writeSse(reply: FastifyReply, event: unknown, seq?: number): void {
@@ -185,6 +188,30 @@ export async function buildServer(options: BuildServerOptions) {
     version: SPOTLIGHT_SERVER_VERSION,
     tools: [],
   }));
+
+  app.get("/v1/meta/models", async (_request, reply) => {
+    if (!options.modelCatalog) {
+      return reply.status(404).send({
+        error: {
+          code: "MODEL_CATALOG_UNAVAILABLE",
+          message: "Model selection is not configured",
+        },
+      });
+    }
+    try {
+      return {
+        models: await options.modelCatalog(),
+        defaultModel: options.defaultModel ?? null,
+      };
+    } catch {
+      return reply.status(502).send({
+        error: {
+          code: "MODEL_CATALOG_UNAVAILABLE",
+          message: "Could not load models from the configured provider",
+        },
+      });
+    }
+  });
   app.get("/v1/meta/ui-prompts", async () => ({
     projectId: options.projectId,
     prompts: options.uiPrompts ?? {

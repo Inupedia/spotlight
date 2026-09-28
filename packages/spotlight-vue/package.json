@@ -101,6 +101,7 @@
   "dependencies": {
     "@inupedia/spotlight-client": "workspace:*",
     "@inupedia/spotlight-protocol": "workspace:*",
+    "lucide-vue-next": "^0.543.0",
     "prettier": "^3.8.1",
     "uqr": "^0.1.3",
     "yaml": "^2.8.4"

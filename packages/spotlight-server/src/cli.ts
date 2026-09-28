@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createAgentModel, createRouterModel } from "./model.js";
+import { createAgentModel, createRouterModel, fetchAvailableModels } from "./model.js";
 import { createMemoryRuntime } from "./memory.js";
 import { loadProjectPack } from "./project.js";
 import { LangChainIntentRouter } from "./router.js";
@@ -52,10 +52,16 @@ export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
     model:
       env.SPOTLIGHT_ROUTER_MODEL ??
       modelConfig.model,
+    routerModel: env.SPOTLIGHT_ROUTER_MODEL,
     timeoutMs: Number(env.SPOTLIGHT_ROUTER_TIMEOUT_MS ?? 20_000),
   };
   return { modelConfig, routerConfig };
 }
+
+let cachedModelCatalog: {
+  models: Awaited<ReturnType<typeof fetchAvailableModels>>;
+  expiresAt: number;
+} | null = null;
 
 export async function main(): Promise<void> {
   const projectConfigPath = required(process.env, "SPOTLIGHT_PROJECT_CONFIG");
@@ -72,6 +78,21 @@ export async function main(): Promise<void> {
     router: new LangChainIntentRouter(createRouterModel(routerConfig), {
       namedTargetCatalogs: project.namedTargetCatalogs,
     }),
+    modelsForRun: (modelId) => {
+      if (!modelId.trim() || modelId.length > 200) {
+        throw new Error("Invalid model selection");
+      }
+      return {
+        model: createAgentModel({ ...modelConfig, model: modelId }),
+        router: new LangChainIntentRouter(
+          createRouterModel({
+            ...routerConfig,
+            model: routerConfig.routerModel ?? modelId,
+          }),
+          { namedTargetCatalogs: project.namedTargetCatalogs },
+        ),
+      };
+    },
     checkpointer: memory.checkpointer,
     store: memory.store,
     durableState,
@@ -83,6 +104,16 @@ export async function main(): Promise<void> {
     apiKeys: (process.env.SPOTLIGHT_API_KEYS ?? "").split(",").map((item) => item.trim()).filter(Boolean),
     corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
     uiPrompts: project.uiPrompts,
+    modelCatalog: async () => {
+      const now = Date.now();
+      if (cachedModelCatalog && cachedModelCatalog.expiresAt > now) {
+        return cachedModelCatalog.models;
+      }
+      const models = await fetchAvailableModels(modelConfig);
+      cachedModelCatalog = { models, expiresAt: now + 5 * 60_000 };
+      return models;
+    },
+    defaultModel: modelConfig.model,
     videoChannels: project.videoChannels,
     durableState,
     capabilitySessionTtlMs: Number(

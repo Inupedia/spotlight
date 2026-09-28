@@ -27,6 +27,7 @@ export {
 } from "./types.js";
 
 export { useSpotlightRuntimeStore } from "./runtimeStore.js";
+export { useSpotlightModelStore } from "./modelStore.js";
 export { useAgentSessionStore } from "../session/agentSession.js";
 export {
   useSpotlightMemoryPreferenceStore,

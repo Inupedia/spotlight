@@ -10,6 +10,7 @@ import type {
 } from "@inupedia/spotlight-protocol";
 import { useAgentSessionStore } from "../session/agentSession.js";
 import { useSpotlightMemoryPreferenceStore } from "../store/memoryPreferenceStore.js";
+import { useSpotlightModelStore } from "../store/modelStore.js";
 import { useSpotlightRuntimeStore } from "../store/runtimeStore.js";
 import { SPOTLIGHT_PIPELINE_STEP_IDS } from "../store/pipeline/constants.js";
 import {
@@ -860,6 +861,15 @@ async function buildRemotePayload(
   const session = useAgentSessionStore();
   const runtime = useSpotlightRuntimeStore();
   const memoryPreference = useSpotlightMemoryPreferenceStore();
+  const modelPreference = useSpotlightModelStore();
+  await modelPreference.loadModels();
+  if (!modelPreference.selectedModel) {
+    throw new Error(
+      modelPreference.error
+        ? `无法加载可用模型列表：${modelPreference.error}`
+        : "当前没有可用模型，请先刷新模型列表。",
+    );
+  }
   const hostManifest = await ensureHostToolsManifest(signal);
   return {
     hostManifest,
@@ -869,6 +879,7 @@ async function buildRemotePayload(
       interactionMode: options?.interactionMode ?? "text",
       memorySubjectId: getSpotlightConfig().getMemorySubjectId?.() ?? undefined,
       memoryRefreshRequested: options?.forceMemoryRefresh === true,
+      model: modelPreference.selectedModel || undefined,
       uiContext: getSpotlightConfig().getUiContext?.() ?? {},
       sessionState: {
         sessionId: session.sessionId,
