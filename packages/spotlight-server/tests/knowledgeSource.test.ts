@@ -5,10 +5,16 @@ import {
 } from "../src/knowledgeSource.js";
 
 describe("knowledge source intent", () => {
-  it("prefers web search for public introductions and news", () => {
-    expect(inferKnowledgeSource("介绍下引大济岷")).toBe("web");
-    expect(inferKnowledgeSource("最近有什么公开新闻")).toBe("web");
-    expect(prefersProjectKnowledgeBase("项目是什么")).toBe(false);
+  it("prefers the project knowledge base for ordinary information questions", () => {
+    expect(inferKnowledgeSource("介绍下引大济岷")).toBe("knowledge");
+    expect(inferKnowledgeSource("项目是什么")).toBe("knowledge");
+    expect(prefersProjectKnowledgeBase("工程进度目前怎么样")).toBe(true);
+  });
+
+  it("uses web search for explicit external or time-sensitive questions", () => {
+    expect(inferKnowledgeSource("请联网搜索最近有什么公开新闻")).toBe("web");
+    expect(inferKnowledgeSource("查一下最新政策")).toBe("web");
+    expect(prefersProjectKnowledgeBase("实时天气怎么样")).toBe(false);
   });
 
   it("prefers the project knowledge base for in-product facts", () => {
@@ -16,7 +22,7 @@ describe("knowledge source intent", () => {
     expect(inferKnowledgeSource("知识库里进度指标含义")).toBe("knowledge");
   });
 
-  it("does not fan out to Yuxi when web search is available", () => {
+  it("does not fan out to web search for project questions", () => {
     expect(
       resolveGatherSources({
         question: "介绍下引大济岷",
@@ -25,7 +31,7 @@ describe("knowledge source intent", () => {
         hasWeb: true,
         hasServer: false,
       }),
-    ).toEqual({ knowledge: false, web: true, server: false });
+    ).toEqual({ knowledge: true, web: false, server: false });
   });
 
   it("falls back to Yuxi when web search is not configured", () => {

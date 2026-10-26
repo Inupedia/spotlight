@@ -4,16 +4,12 @@ import type {
   WorkflowLane,
 } from "./contracts.js";
 
-/**
- * Questions that need unpublished / in-product facts.
- * Everything else on the knowledge lane prefers public web search when it exists,
- * because the project knowledge base (Yuxi) is too slow to run "just in case".
- */
-const PROJECT_KNOWLEDGE_PATTERN =
-  /这个模块|模块含义|本系统|本平台|当前页面|当前界面|知识库|内部资料|项目资料|工程档案|本工程|界面上|系统里|平台里的|这个功能|这个面板|这个按钮|指标含义/iu;
+/** Use the project corpus by default; choose web only for explicit external or current information. */
+const EXTERNAL_WEB_SEARCH_PATTERN =
+  /联网搜索|网络搜索|网上搜索|网上查找|网页搜索|web\s*search|外部资料|外部来源|时效性|新闻|天气|汇率|股价|股票|最新(?:政策|法规|标准|公告|新闻|天气|汇率|股价|价格)|现行(?:政策|法规|标准)|实时(?:数据|天气|汇率|股价)/iu;
 
 export function prefersProjectKnowledgeBase(question: string): boolean {
-  return PROJECT_KNOWLEDGE_PATTERN.test(question.trim());
+  return !EXTERNAL_WEB_SEARCH_PATTERN.test(question.trim());
 }
 
 export function inferKnowledgeSource(question: string): KnowledgeSource {
