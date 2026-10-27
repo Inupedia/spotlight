@@ -14,6 +14,10 @@ export interface SpotlightModelCatalogEntry {
   ownedBy?: string;
 }
 
+function isDeepSeekModelName(modelName: string): boolean {
+  return /^deepseek(?:-|$)/iu.test(modelName);
+}
+
 /**
  * DeepSeek's Chat Completions API supports JSON objects and tool calls, but not
  * OpenAI's `response_format: json_schema`. Use function calling for Spotlight's
@@ -23,7 +27,7 @@ export function structuredOutputOptionsForModel(
   model: BaseChatModel,
 ): { method: "functionCalling" } | {} {
   const modelName = (model as BaseChatModel & { model?: unknown }).model;
-  return typeof modelName === "string" && /^deepseek(?:-|$)/iu.test(modelName)
+  return typeof modelName === "string" && isDeepSeekModelName(modelName)
     ? { method: "functionCalling" }
     : {};
 }
@@ -75,12 +79,19 @@ export function createAgentModel(config: SpotlightModelConfig) {
 }
 
 export function createRouterModel(config: SpotlightModelConfig) {
+  const model = config.routerModel ?? config.model;
+  // LangChain forces a named function tool for structured output. DeepSeek's
+  // thinking mode rejects named tool_choice, so disable it on router calls.
+  const modelKwargs = isDeepSeekModelName(model)
+    ? ({ thinking: { type: "disabled" } } as unknown as ChatOpenAI["modelKwargs"])
+    : undefined;
   return new ChatOpenAI({
     apiKey: config.apiKey,
-    model: config.routerModel ?? config.model,
+    model,
     temperature: 0,
     timeout: config.timeoutMs ?? 20_000,
     maxRetries: 1,
+    modelKwargs,
     configuration: config.baseURL ? { baseURL: config.baseURL } : undefined,
   });
 }
