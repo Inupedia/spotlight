@@ -25,19 +25,50 @@ export function parseCorsOrigin(
 }
 
 export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
-  const useQwen = env.SPOTLIGHT_LLM_PROVIDER?.trim().toLowerCase() === "qwen";
+  const provider =
+    env.SPOTLIGHT_LLM_PROVIDER?.trim().toLowerCase() || "siliconflow";
+  const providerConfigs = {
+    siliconflow: {
+      apiKey: "SILICONFLOW_API_KEY",
+      baseURL: "SILICONFLOW_API_BASE",
+      model: "SILICONFLOW_MODEL",
+    },
+    qwen: {
+      apiKey: "QWEN_API_KEY",
+      baseURL: "QWEN_API_BASE",
+      model: "QWEN_MODEL",
+    },
+    deepseek: {
+      apiKey: "DEEPSEEK_API_KEY",
+      baseURL: "DEEPSEEK_API_BASE",
+      model: "DEEPSEEK_MODEL",
+      defaultBaseURL: "https://api.deepseek.com",
+      defaultModel: "deepseek-flash",
+    },
+  } as const;
+  const selectedProvider =
+    providerConfigs[provider as keyof typeof providerConfigs];
+  if (!selectedProvider) {
+    throw new Error(`Unsupported SPOTLIGHT_LLM_PROVIDER: ${provider}`);
+  }
   const modelConfig = {
     apiKey: required(
       env,
       "SPOTLIGHT_LLM_API_KEY",
-      useQwen ? "QWEN_API_KEY" : "SILICONFLOW_API_KEY",
+      selectedProvider.apiKey,
     ),
     baseURL:
       env.SPOTLIGHT_LLM_BASE_URL ??
-      (useQwen ? env.QWEN_API_BASE : env.SILICONFLOW_API_BASE),
+      env[selectedProvider.baseURL] ??
+      ("defaultBaseURL" in selectedProvider
+        ? selectedProvider.defaultBaseURL
+        : undefined),
     model:
       env.SPOTLIGHT_LLM_MODEL ??
-      (useQwen ? env.QWEN_MODEL : env.SILICONFLOW_MODEL) ??
+      env[selectedProvider.model] ??
+      ("defaultModel" in selectedProvider
+        ? selectedProvider.defaultModel
+        : undefined) ??
       "gpt-4.1-mini",
     routerModel: env.SPOTLIGHT_ROUTER_MODEL,
     timeoutMs: Number(env.SPOTLIGHT_LLM_TIMEOUT_MS ?? 45_000),

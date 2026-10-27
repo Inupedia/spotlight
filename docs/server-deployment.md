@@ -116,7 +116,7 @@ SPOTLIGHT_DATABASE_URL=postgresql://spotlight:password@postgres:5432/spotlight
 SPOTLIGHT_STATE_DIR=/data/spotlight-state
 ```
 
-也支持 `SPOTLIGHT_LLM_PROVIDER=qwen` 配合 `QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL`。Router 可通过 `SPOTLIGHT_ROUTER_*` 使用独立模型，温度固定为 0。
+`SPOTLIGHT_LLM_PROVIDER` 支持 `siliconflow`（默认）、`qwen` 和 `deepseek`。DeepSeek 使用 `DEEPSEEK_API_KEY`、可选的 `DEEPSEEK_API_BASE`（默认 `https://api.deepseek.com`）和 `DEEPSEEK_MODEL`（默认 `deepseek-flash`）；也可以用 `SPOTLIGHT_LLM_API_KEY / SPOTLIGHT_LLM_BASE_URL / SPOTLIGHT_LLM_MODEL` 提供通用覆盖。Qwen 使用 `QWEN_API_KEY / QWEN_API_BASE / QWEN_MODEL`。Router 可通过 `SPOTLIGHT_ROUTER_*` 使用独立模型，温度固定为 0。
 
 ## 验收
 

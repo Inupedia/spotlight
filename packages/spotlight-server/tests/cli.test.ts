@@ -38,6 +38,24 @@ describe("resolveModelConfigs", () => {
     expect(resolved.routerConfig.model).toBe("qwen-plus");
   });
 
+  it("uses DeepSeek defaults for both the agent and router", () => {
+    const resolved = resolveModelConfigs({
+      SPOTLIGHT_LLM_PROVIDER: "deepseek",
+      DEEPSEEK_API_KEY: "deepseek-key",
+    });
+
+    expect(resolved.modelConfig).toMatchObject({
+      apiKey: "deepseek-key",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-flash",
+    });
+    expect(resolved.routerConfig).toMatchObject({
+      apiKey: "deepseek-key",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-flash",
+    });
+  });
+
   it("allows an explicit independent router override", () => {
     const resolved = resolveModelConfigs({
       SILICONFLOW_API_KEY: "sf-key",
