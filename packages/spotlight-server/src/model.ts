@@ -1,4 +1,5 @@
 import { ChatOpenAI } from "@langchain/openai";
+import type { BaseChatModel } from "@langchain/core/language_models/chat_models";
 
 export interface SpotlightModelConfig {
   apiKey: string;
@@ -11,6 +12,20 @@ export interface SpotlightModelConfig {
 export interface SpotlightModelCatalogEntry {
   id: string;
   ownedBy?: string;
+}
+
+/**
+ * DeepSeek's Chat Completions API supports JSON objects and tool calls, but not
+ * OpenAI's `response_format: json_schema`. Use function calling for Spotlight's
+ * structured routing outputs when the selected model is DeepSeek.
+ */
+export function structuredOutputOptionsForModel(
+  model: BaseChatModel,
+): { method: "functionCalling" } | {} {
+  const modelName = (model as BaseChatModel & { model?: unknown }).model;
+  return typeof modelName === "string" && /^deepseek(?:-|$)/iu.test(modelName)
+    ? { method: "functionCalling" }
+    : {};
 }
 
 const NON_CHAT_MODEL_ID =

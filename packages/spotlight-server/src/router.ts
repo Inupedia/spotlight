@@ -23,6 +23,7 @@ import {
 } from "./skillIntentRouter.js";
 import type { SpotlightNamedTargetCatalog } from "./contracts.js";
 import { normalizeClientToolInputDetailed } from "./tools.js";
+import { structuredOutputOptionsForModel } from "./model.js";
 
 const intentSchema = z.object({
   route: z.enum(["knowledge", "action", "clarify"]),
@@ -404,7 +405,10 @@ export class LangChainIntentRouter implements IntentRouter {
     if (candidates.length === 0) return { requestedToolNames: [] };
     const structured = this.model.withStructuredOutput(
       skillToolSelectionSchema,
-      { name: "spotlight_skill_tool_selection" },
+      {
+        name: "spotlight_skill_tool_selection",
+        ...structuredOutputOptionsForModel(this.model),
+      },
     );
     const selected = await structured.invoke([
       new SystemMessage(
@@ -622,6 +626,7 @@ export class LangChainIntentRouter implements IntentRouter {
     }));
     const structured = this.model.withStructuredOutput(intentSchema, {
       name: "spotlight_intent_route",
+      ...structuredOutputOptionsForModel(this.model),
     });
     const raw = await structured.invoke([
       new SystemMessage(

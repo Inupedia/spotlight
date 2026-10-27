@@ -6,6 +6,7 @@ import type {
 } from "@inupedia/spotlight-protocol";
 import type { SpotlightNamedTargetCatalog } from "./contracts.js";
 import { z } from "zod";
+import { structuredOutputOptionsForModel } from "./model.js";
 
 const skillRouteSchema = z.object({
   route: z.enum(["knowledge", "action", "clarify"]),
@@ -436,6 +437,7 @@ export async function routeViaSkillCatalog(
   if (skills.length === 0) return null;
   const structured = model.withStructuredOutput(skillRouteSchema, {
     name: "spotlight_skill_route",
+    ...structuredOutputOptionsForModel(model),
   });
   const raw = skillRouteSchema.parse(
     await structured.invoke([
