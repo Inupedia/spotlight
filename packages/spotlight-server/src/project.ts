@@ -29,6 +29,7 @@ interface ProjectConfigFile {
   systemPromptFile?: string;
   uiPromptsFile?: string;
   videoChannelsFile?: string;
+  videoStreamsFile?: string;
   providers?: {
     knowledge?: ProviderConfig;
     webSearch?: ProviderConfig;
@@ -131,11 +132,29 @@ export async function loadProjectPack(
   const channelItems = Array.isArray(rawChannels)
     ? rawChannels
     : rawChannels?.videoChannels;
-  const videoChannels = channelItems?.map((item) => ({
-    id: item.id,
-    name: item.name ?? item.label ?? item.id,
-    aliases: item.aliases ?? [],
-  })) ?? extension.videoChannels;
+  const videoChannels =
+    channelItems?.map((item) => ({
+      id: item.id,
+      name: item.name ?? item.label ?? item.id,
+      aliases: item.aliases ?? [],
+    })) ?? extension.videoChannels;
+
+  const rawVideoStreams = (await readJson(
+    configPath,
+    config.videoStreamsFile,
+  )) as
+    | { videoStreams?: Array<{ id: string; url: string }> }
+    | Array<{ id: string; url: string }>
+    | undefined;
+  const videoStreams = Array.isArray(rawVideoStreams)
+    ? rawVideoStreams
+    : rawVideoStreams?.videoStreams;
+  for (const stream of videoStreams ?? []) {
+    const parsedUrl = new URL(stream.url);
+    if (!stream.id.trim() || !["ws:", "wss:"].includes(parsedUrl.protocol)) {
+      throw new Error(`Invalid video stream configuration: ${stream.id}`);
+    }
+  }
 
   const knowledgeConfig = config.providers?.knowledge;
   const webConfig = config.providers?.webSearch;
@@ -146,6 +165,7 @@ export async function loadProjectPack(
     serverTools: extension.serverTools ?? [],
     uiPrompts: uiPrompts ?? extension.uiPrompts,
     videoChannels,
+    videoStreams: videoStreams ?? extension.videoStreams,
     namedTargetCatalogs: [
       ...(extension.namedTargetCatalogs ?? []),
       ...(videoChannels?.length

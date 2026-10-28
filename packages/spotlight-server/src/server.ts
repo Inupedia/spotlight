@@ -1,6 +1,7 @@
 import cors from "@fastify/cors";
 import Fastify from "fastify";
 import type { FastifyReply } from "fastify";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type {
   FrontendToolDescriptorV1,
@@ -36,10 +37,7 @@ import {
   extractTranscriptionText,
 } from "./audio.js";
 import { resolveSpeechAudioConfig } from "./voice/config.js";
-import {
-  VoiceRemoteRegistry,
-  isVoiceRemotePublicPath,
-} from "./voiceRemote.js";
+import { VoiceRemoteRegistry, isVoiceRemotePublicPath } from "./voiceRemote.js";
 
 export const SPOTLIGHT_SERVER_VERSION = (
   JSON.parse(
@@ -54,6 +52,8 @@ export interface BuildServerOptions {
   corsOrigin?: string | string[];
   uiPrompts?: Record<string, unknown>;
   videoChannels?: Array<{ id: string; name: string; aliases: string[] }>;
+  videoStreams?: Array<{ id: string; url: string }>;
+  mediaTokenSecret?: string;
   durableState?: SpotlightDurableState;
   capabilitySessionTtlMs?: number;
   modelCatalog?: () => Promise<SpotlightModelCatalogEntry[]>;
@@ -72,8 +72,10 @@ function initializeResponse(
 ): SpotlightInitializeResponse {
   const readyBrowserTools = new Set(
     request.toolManifest.tools
-      .filter((tool) =>
-        deriveToolTier(tool) !== "mutate" || tool.requiresConfirmation === true,
+      .filter(
+        (tool) =>
+          deriveToolTier(tool) !== "mutate" ||
+          tool.requiresConfirmation === true,
       )
       .map((tool) => tool.name),
   );
@@ -84,29 +86,32 @@ function initializeResponse(
     return {
       name: tool.name,
       target: "browser" as const,
-      status: unsupported ? "unsupported" as const : "ready" as const,
+      status: unsupported ? ("unsupported" as const) : ("ready" as const),
       ...(unsupported
-          ? { reason: "Mutating client Tools must require explicit approval" }
+        ? { reason: "Mutating client Tools must require explicit approval" }
         : {}),
     };
   });
-  const skills = (request.skills ?? []).map((skill: SpotlightSkillRegistration) => {
-    const dependencies = (skill.dependencies?.tools ?? []).map((tool) =>
-      typeof tool === "string" ? tool : tool.value,
-    );
-    const missingTools = dependencies.filter(
-      (name) => !readyBrowserTools.has(name) && !serverTools.has(name),
-    );
-    return {
-      name: skill.name,
-      status: missingTools.length === 0 ? "ready" as const : "missing" as const,
-      missingTools,
-      allowImplicitInvocation: skill.allowImplicitInvocation !== false,
-      ...(missingTools.length > 0
-        ? { reason: `Missing tool dependencies: ${missingTools.join(", ")}` }
-        : {}),
-    };
-  });
+  const skills = (request.skills ?? []).map(
+    (skill: SpotlightSkillRegistration) => {
+      const dependencies = (skill.dependencies?.tools ?? []).map((tool) =>
+        typeof tool === "string" ? tool : tool.value,
+      );
+      const missingTools = dependencies.filter(
+        (name) => !readyBrowserTools.has(name) && !serverTools.has(name),
+      );
+      return {
+        name: skill.name,
+        status:
+          missingTools.length === 0 ? ("ready" as const) : ("missing" as const),
+        missingTools,
+        allowImplicitInvocation: skill.allowImplicitInvocation !== false,
+        ...(missingTools.length > 0
+          ? { reason: `Missing tool dependencies: ${missingTools.join(", ")}` }
+          : {}),
+      };
+    },
+  );
   return {
     protocolVersion: SPOTLIGHT_APP_PROTOCOL_V1,
     serverInfo: {
@@ -146,6 +151,13 @@ function resumeCursor(
 export async function buildServer(options: BuildServerOptions) {
   const app = Fastify({ logger: true, bodyLimit: 12 * 1024 * 1024 });
   const durableState = options.durableState ?? new SpotlightDurableState();
+  const mediaTokenSecret =
+    options.mediaTokenSecret?.trim() ||
+    options.apiKeys?.[0] ||
+    randomBytes(32).toString("hex");
+  const videoStreams = new Map(
+    (options.videoStreams ?? []).map((stream) => [stream.id, stream.url]),
+  );
   await app.register(cors, {
     origin: options.corsOrigin ?? "*",
     methods: ["GET", "POST", "DELETE", "OPTIONS"],
@@ -161,6 +173,7 @@ export async function buildServer(options: BuildServerOptions) {
   app.addHook("preHandler", async (request, reply) => {
     const path = request.url.split("?")[0] ?? request.url;
     if (path === "/health" || !options.apiKeys?.length) return;
+    if (request.method === "GET" && /^\/v1\/media\/[^/]+$/u.test(path)) return;
     if (isVoiceRemotePublicPath(path)) return;
     const direct = request.headers["x-spotlight-api-key"];
     const authorization = request.headers.authorization;
@@ -223,6 +236,167 @@ export async function buildServer(options: BuildServerOptions) {
     projectId: options.projectId,
     channels: options.videoChannels ?? [],
   }));
+  app.post("/v1/media/:id/session", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    if (!videoStreams.has(id)) {
+      return reply.status(404).send({
+        error: {
+          code: "VIDEO_STREAM_NOT_FOUND",
+          message: "Video stream is not configured",
+        },
+      });
+    }
+
+    const expiresAt = Math.floor(Date.now() / 1000) + 6 * 60 * 60;
+    const payload = Buffer.from(JSON.stringify({ id, expiresAt })).toString(
+      "base64url",
+    );
+    const signature = createHmac("sha256", mediaTokenSecret)
+      .update(payload)
+      .digest("base64url");
+    return {
+      playbackUrl: `/v1/media/${encodeURIComponent(id)}?token=${payload}.${signature}`,
+      expiresAt,
+    };
+  });
+  app.get("/v1/media/:id", async (request, reply) => {
+    const { id } = request.params as { id: string };
+    const sourceUrl = videoStreams.get(id);
+    if (!sourceUrl) {
+      return reply.status(404).send({
+        error: {
+          code: "VIDEO_STREAM_NOT_FOUND",
+          message: "Video stream is not configured",
+        },
+      });
+    }
+
+    const token = (request.query as { token?: unknown }).token;
+    if (typeof token !== "string") {
+      return reply.status(401).send({
+        error: {
+          code: "INVALID_VIDEO_SESSION",
+          message: "Video session is invalid or expired",
+        },
+      });
+    }
+    const [payload, suppliedSignature, extra] = token.split(".");
+    if (!payload || !suppliedSignature || extra !== undefined) {
+      return reply.status(401).send({
+        error: {
+          code: "INVALID_VIDEO_SESSION",
+          message: "Video session is invalid or expired",
+        },
+      });
+    }
+    const expectedSignature = createHmac("sha256", mediaTokenSecret)
+      .update(payload)
+      .digest();
+    let validSignature = false;
+    try {
+      const actualSignature = Buffer.from(suppliedSignature, "base64url");
+      validSignature =
+        actualSignature.length === expectedSignature.length &&
+        timingSafeEqual(actualSignature, expectedSignature);
+    } catch {
+      validSignature = false;
+    }
+    let tokenPayload: { id?: unknown; expiresAt?: unknown } | undefined;
+    try {
+      tokenPayload = JSON.parse(
+        Buffer.from(payload, "base64url").toString("utf8"),
+      );
+    } catch {
+      tokenPayload = undefined;
+    }
+    if (
+      !validSignature ||
+      tokenPayload?.id !== id ||
+      typeof tokenPayload.expiresAt !== "number" ||
+      tokenPayload.expiresAt <= Math.floor(Date.now() / 1000)
+    ) {
+      return reply.status(401).send({
+        error: {
+          code: "INVALID_VIDEO_SESSION",
+          message: "Video session is invalid or expired",
+        },
+      });
+    }
+
+    reply.hijack();
+    const response = reply.raw;
+    let responseStarted = false;
+    let finished = false;
+    const upstream = new WebSocket(sourceUrl);
+    upstream.binaryType = "arraybuffer";
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(connectTimer);
+      try {
+        upstream.close();
+      } catch {
+        // Ignore a close racing with an upstream error.
+      }
+      if (!response.writableEnded) response.end();
+    };
+    const fail = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(connectTimer);
+      try {
+        upstream.close();
+      } catch {
+        // Ignore a close racing with an upstream error.
+      }
+      if (!response.writableEnded) {
+        if (!responseStarted) {
+          response.writeHead(502, {
+            "content-type": "text/plain; charset=utf-8",
+          });
+        }
+        response.end(
+          responseStarted ? undefined : "Upstream video stream unavailable",
+        );
+      }
+    };
+    const connectTimer = setTimeout(fail, 15_000);
+    request.raw.once("aborted", finish);
+    response.once("close", () => {
+      if (!response.writableEnded) finish();
+    });
+    upstream.addEventListener("open", () => {
+      if (finished) return;
+      clearTimeout(connectTimer);
+      responseStarted = true;
+      response.writeHead(200, {
+        "content-type": "video/x-flv",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "x-accel-buffering": "no",
+        connection: "keep-alive",
+        "transfer-encoding": "chunked",
+      });
+      response.flushHeaders();
+    });
+    upstream.addEventListener("message", (event) => {
+      if (finished || typeof event.data === "string") return;
+      if (event.data instanceof ArrayBuffer) {
+        response.write(Buffer.from(event.data));
+      } else if (ArrayBuffer.isView(event.data)) {
+        response.write(
+          Buffer.from(
+            event.data.buffer,
+            event.data.byteOffset,
+            event.data.byteLength,
+          ),
+        );
+      }
+    });
+    upstream.addEventListener("close", finish, { once: true });
+    upstream.addEventListener("error", fail, { once: true });
+    return reply;
+  });
   app.get("/v1/diagnostics", async () => ({
     projectId: options.projectId,
     serverVersion: SPOTLIGHT_SERVER_VERSION,
@@ -270,7 +444,11 @@ export async function buildServer(options: BuildServerOptions) {
     "/v1/audio/transcriptions",
     async (request, reply) => {
       try {
-        return await transcribeSpotlightAudio(request.body, process.env, request.signal);
+        return await transcribeSpotlightAudio(
+          request.body,
+          process.env,
+          request.signal,
+        );
       } catch (error) {
         if (error instanceof SpotlightAudioError) {
           return reply.status(error.statusCode).send({
@@ -297,7 +475,10 @@ export async function buildServer(options: BuildServerOptions) {
       const view = voiceRemote.publicView(request.params.token);
       if (!view) {
         return reply.status(404).send({
-          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+          error: {
+            code: "VOICE_REMOTE_EXPIRED",
+            message: "配对已失效，请重新扫码。",
+          },
         });
       }
       return view;
@@ -310,7 +491,10 @@ export async function buildServer(options: BuildServerOptions) {
       const session = voiceRemote.touchPhone(request.params.token);
       if (!session) {
         return reply.status(404).send({
-          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+          error: {
+            code: "VOICE_REMOTE_EXPIRED",
+            message: "配对已失效，请重新扫码。",
+          },
         });
       }
       return voiceRemote.publicView(request.params.token);
@@ -322,7 +506,10 @@ export async function buildServer(options: BuildServerOptions) {
     async (request, reply) => {
       if (!voiceRemote.get(request.params.token)) {
         return reply.status(404).send({
-          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+          error: {
+            code: "VOICE_REMOTE_EXPIRED",
+            message: "配对已失效，请重新扫码。",
+          },
         });
       }
       return { utterances: voiceRemote.takePending(request.params.token) };
@@ -332,49 +519,58 @@ export async function buildServer(options: BuildServerOptions) {
   app.post<{
     Params: { token: string };
     Body: SpotlightTranscriptionInput & { text?: string };
-  }>(
-    "/v1/voice-remote/sessions/:token/utterance",
-    async (request, reply) => {
-      if (!voiceRemote.get(request.params.token)) {
-        return reply.status(404).send({
-          error: { code: "VOICE_REMOTE_EXPIRED", message: "配对已失效，请重新扫码。" },
+  }>("/v1/voice-remote/sessions/:token/utterance", async (request, reply) => {
+    if (!voiceRemote.get(request.params.token)) {
+      return reply.status(404).send({
+        error: {
+          code: "VOICE_REMOTE_EXPIRED",
+          message: "配对已失效，请重新扫码。",
+        },
+      });
+    }
+    try {
+      const typed = request.body?.text?.trim();
+      let text = typed ?? "";
+      if (!text) {
+        const raw = await transcribeSpotlightAudio(
+          request.body,
+          process.env,
+          request.signal,
+        );
+        text = extractTranscriptionText(raw);
+      }
+      const utterance = voiceRemote.enqueue(request.params.token, text);
+      if (!utterance) {
+        return reply.status(400).send({
+          error: {
+            code: "EMPTY_UTTERANCE",
+            message: "没识别到内容，请再说一次。",
+          },
         });
       }
-      try {
-        const typed = request.body?.text?.trim();
-        let text = typed ?? "";
-        if (!text) {
-          const raw = await transcribeSpotlightAudio(
-            request.body,
-            process.env,
-            request.signal,
-          );
-          text = extractTranscriptionText(raw);
-        }
-        const utterance = voiceRemote.enqueue(request.params.token, text);
-        if (!utterance) {
-          return reply.status(400).send({
-            error: { code: "EMPTY_UTTERANCE", message: "没识别到内容，请再说一次。" },
-          });
-        }
-        return { ok: true, text: utterance.text, id: utterance.id };
-      } catch (error) {
-        if (error instanceof SpotlightAudioError) {
-          return reply.status(error.statusCode).send({
-            error: { code: error.code, message: error.message },
-          });
-        }
-        throw error;
+      return { ok: true, text: utterance.text, id: utterance.id };
+    } catch (error) {
+      if (error instanceof SpotlightAudioError) {
+        return reply.status(error.statusCode).send({
+          error: { code: error.code, message: error.message },
+        });
       }
-    },
-  );
+      throw error;
+    }
+  });
 
   app.post<{ Body: SpotlightSpeechInput }>(
     "/v1/audio/speech",
     async (request, reply) => {
       try {
-        const audio = await synthesizeSpotlightSpeech(request.body, process.env, request.signal);
-        return reply.header("Content-Type", audio.contentType).send(audio.buffer);
+        const audio = await synthesizeSpotlightSpeech(
+          request.body,
+          process.env,
+          request.signal,
+        );
+        return reply
+          .header("Content-Type", audio.contentType)
+          .send(audio.buffer);
       } catch (error) {
         if (error instanceof SpotlightAudioError) {
           return reply.status(error.statusCode).send({
@@ -400,12 +596,18 @@ export async function buildServer(options: BuildServerOptions) {
       }
       if (body.projectId !== options.projectId) {
         return reply.status(403).send({
-          error: { code: "PROJECT_FORBIDDEN", message: "Project is not loaded" },
+          error: {
+            code: "PROJECT_FORBIDDEN",
+            message: "Project is not loaded",
+          },
         });
       }
       if (body.toolManifest?.projectId !== options.projectId) {
         return reply.status(400).send({
-          error: { code: "MANIFEST_PROJECT_MISMATCH", message: "Tool manifest project does not match" },
+          error: {
+            code: "MANIFEST_PROJECT_MISMATCH",
+            message: "Tool manifest project does not match",
+          },
         });
       }
       const stored = durableState.createCapability({
@@ -434,7 +636,10 @@ export async function buildServer(options: BuildServerOptions) {
     async (request, reply) => {
       if (request.body?.projectId !== options.projectId) {
         return reply.status(403).send({
-          error: { code: "PROJECT_FORBIDDEN", message: "Project is not loaded" },
+          error: {
+            code: "PROJECT_FORBIDDEN",
+            message: "Project is not loaded",
+          },
         });
       }
       return {
@@ -487,7 +692,10 @@ export async function buildServer(options: BuildServerOptions) {
       }
       if (body.projectId && body.projectId !== options.projectId) {
         return reply.status(403).send({
-          error: { code: "PROJECT_FORBIDDEN", message: "Project is not loaded" },
+          error: {
+            code: "PROJECT_FORBIDDEN",
+            message: "Project is not loaded",
+          },
         });
       }
       const capability = durableState.getCapability(body.capabilitySessionId);
@@ -495,7 +703,8 @@ export async function buildServer(options: BuildServerOptions) {
         return reply.status(409).send({
           error: {
             code: "CAPABILITY_SESSION_EXPIRED",
-            message: "Capability session is missing or expired; initialize again",
+            message:
+              "Capability session is missing or expired; initialize again",
             retryable: true,
           },
         });
@@ -513,14 +722,14 @@ export async function buildServer(options: BuildServerOptions) {
         return reply.status(409).send({
           error: {
             code: "CAPABILITY_DIGEST_MISMATCH",
-            message: "Turn manifest does not match the initialized capability session",
+            message:
+              "Turn manifest does not match the initialized capability session",
           },
         });
       }
       const resolvedBody: SpotlightTurnStartRequest = {
         ...body,
-        clientToolManifest:
-          body.clientToolManifest ?? capability?.toolManifest,
+        clientToolManifest: body.clientToolManifest ?? capability?.toolManifest,
         skills: body.skills ?? capability?.skills,
         frontendBuildId:
           body.frontendBuildId ?? capability?.toolManifest.frontendBuildId,
@@ -560,117 +769,119 @@ export async function buildServer(options: BuildServerOptions) {
     },
   );
 
-  app.get<{ Params: { turnId: string }; Querystring: { lastEventId?: string } }>(
-    "/v1/turns/:turnId/events",
-    async (request, reply) => {
-      const state = options.runManager.getRun(request.params.turnId);
-      if (!state) {
-        const stored = durableState.getTurn(request.params.turnId);
-        if (stored) {
-          const afterSeq = resumeCursor(
-            request.headers["last-event-id"],
-            request.query?.lastEventId,
-          );
-          reply.raw.writeHead(200, {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-            "X-Accel-Buffering": "no",
-          });
-          reply.hijack();
-          const projector = new SpotlightLifecycleProjector(
-            stored.threadId,
-            stored.id,
-            stored.startedAt,
-            stored.request.skills,
-          );
-          const projected = [
-            projector.startEvent(),
-            ...stored.events.flatMap((event) =>
-              projector.project(event as SpotlightServerRunEvent),
-            ),
-          ];
-          for (const event of projected) {
-            if (event.seq > afterSeq) writeSse(reply, event, event.seq);
-          }
-          reply.raw.end();
-          return;
-        }
-        const expired = options.runManager.isExpired(request.params.turnId);
-        return reply.status(expired ? 410 : 404).send({
-          error: expired
-            ? { code: "TURN_EXPIRED", message: "Turn is no longer retained" }
-            : { code: "TURN_NOT_FOUND", message: "Turn not found" },
+  app.get<{
+    Params: { turnId: string };
+    Querystring: { lastEventId?: string };
+  }>("/v1/turns/:turnId/events", async (request, reply) => {
+    const state = options.runManager.getRun(request.params.turnId);
+    if (!state) {
+      const stored = durableState.getTurn(request.params.turnId);
+      if (stored) {
+        const afterSeq = resumeCursor(
+          request.headers["last-event-id"],
+          request.query?.lastEventId,
+        );
+        reply.raw.writeHead(200, {
+          "Content-Type": "text/event-stream; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+          Connection: "keep-alive",
+          "X-Accel-Buffering": "no",
         });
-      }
-      const afterSeq = resumeCursor(
-        request.headers["last-event-id"],
-        request.query?.lastEventId,
-      );
-      reply.raw.writeHead(200, {
-        "Content-Type": "text/event-stream; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-        Connection: "keep-alive",
-        "X-Accel-Buffering": "no",
-      });
-      reply.hijack();
-      const projector = new SpotlightLifecycleProjector(
-        state.sessionId ?? state.id,
-        state.id,
-        state.startedAt,
-        state.request.skills,
-      );
-      const send = (event: SpotlightTurnEvent) => {
-        if (event.seq <= afterSeq) return;
-        writeSse(reply, event, event.seq);
-      };
-      send(projector.startEvent());
-      let unsubscribe: (() => void) | null = null;
-      let heartbeat: NodeJS.Timeout | null = null;
-      unsubscribe = options.runManager.subscribe(state.id, (legacyEvent) => {
-        for (const event of projector.project(legacyEvent)) {
-          send(event);
-          if (event.type === "turn.completed" || event.type === "turn.failed") {
-            if (heartbeat) clearInterval(heartbeat);
-            unsubscribe?.();
-            reply.raw.end();
-          }
+        reply.hijack();
+        const projector = new SpotlightLifecycleProjector(
+          stored.threadId,
+          stored.id,
+          stored.startedAt,
+          stored.request.skills,
+        );
+        const projected = [
+          projector.startEvent(),
+          ...stored.events.flatMap((event) =>
+            projector.project(event as SpotlightServerRunEvent),
+          ),
+        ];
+        for (const event of projected) {
+          if (event.seq > afterSeq) writeSse(reply, event, event.seq);
         }
+        reply.raw.end();
+        return;
+      }
+      const expired = options.runManager.isExpired(request.params.turnId);
+      return reply.status(expired ? 410 : 404).send({
+        error: expired
+          ? { code: "TURN_EXPIRED", message: "Turn is no longer retained" }
+          : { code: "TURN_NOT_FOUND", message: "Turn not found" },
       });
-      if (!reply.raw.writableEnded) {
-        heartbeat = setInterval(
-          () => writeSse(reply, {
+    }
+    const afterSeq = resumeCursor(
+      request.headers["last-event-id"],
+      request.query?.lastEventId,
+    );
+    reply.raw.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    });
+    reply.hijack();
+    const projector = new SpotlightLifecycleProjector(
+      state.sessionId ?? state.id,
+      state.id,
+      state.startedAt,
+      state.request.skills,
+    );
+    const send = (event: SpotlightTurnEvent) => {
+      if (event.seq <= afterSeq) return;
+      writeSse(reply, event, event.seq);
+    };
+    send(projector.startEvent());
+    let unsubscribe: (() => void) | null = null;
+    let heartbeat: NodeJS.Timeout | null = null;
+    unsubscribe = options.runManager.subscribe(state.id, (legacyEvent) => {
+      for (const event of projector.project(legacyEvent)) {
+        send(event);
+        if (event.type === "turn.completed" || event.type === "turn.failed") {
+          if (heartbeat) clearInterval(heartbeat);
+          unsubscribe?.();
+          reply.raw.end();
+        }
+      }
+    });
+    if (!reply.raw.writableEnded) {
+      heartbeat = setInterval(
+        () =>
+          writeSse(reply, {
             type: "ping",
             at: Date.now(),
             threadId: state.sessionId ?? state.id,
             turnId: state.id,
           }),
-          15_000,
-        );
-        heartbeat.unref();
-      }
-      request.raw.on("close", () => {
-        if (heartbeat) clearInterval(heartbeat);
-        unsubscribe?.();
-      });
-    },
-  );
+        15_000,
+      );
+      heartbeat.unref();
+    }
+    request.raw.on("close", () => {
+      if (heartbeat) clearInterval(heartbeat);
+      unsubscribe?.();
+    });
+  });
 
   app.post<{ Params: { turnId: string }; Body: HostToolResultRequest }>(
     "/v1/turns/:turnId/tool-results",
-    async (request, reply) => options.runManager.completeHostAction(
-      request.params.turnId,
-      request.body,
-    )
-      ? { ok: true }
-      : reply.status(404).send({ error: { code: "CLIENT_TOOL_CALL_NOT_FOUND" } }),
+    async (request, reply) =>
+      options.runManager.completeHostAction(request.params.turnId, request.body)
+        ? { ok: true }
+        : reply
+            .status(404)
+            .send({ error: { code: "CLIENT_TOOL_CALL_NOT_FOUND" } }),
   );
 
   app.delete<{ Params: { turnId: string } }>(
     "/v1/turns/:turnId",
-    async (request, reply) => options.runManager.cancelRun(request.params.turnId)
-      ? { ok: true }
-      : reply.status(404).send({ error: { code: "TURN_NOT_FOUND" } }),
+    async (request, reply) =>
+      options.runManager.cancelRun(request.params.turnId)
+        ? { ok: true }
+        : reply.status(404).send({ error: { code: "TURN_NOT_FOUND" } }),
   );
 
   app.post<{ Body: Record<string, unknown> }>(
@@ -678,24 +889,21 @@ export async function buildServer(options: BuildServerOptions) {
     async (request, reply) => {
       const body = request.body;
       if (typeof body?.userQuestion !== "string" || !body.userQuestion.trim()) {
-        return reply
-          .status(400)
-          .send({
-            error: { code: "BAD_REQUEST", message: "userQuestion is required" },
-          });
+        return reply.status(400).send({
+          error: { code: "BAD_REQUEST", message: "userQuestion is required" },
+        });
       }
       if (body.projectId && body.projectId !== options.projectId) {
-        return reply
-          .status(403)
-          .send({
-            error: {
-              code: "PROJECT_FORBIDDEN",
-              message: "Project is not loaded",
-            },
-          });
+        return reply.status(403).send({
+          error: {
+            code: "PROJECT_FORBIDDEN",
+            message: "Project is not loaded",
+          },
+        });
       }
       const manifestTools = (
-        body.clientToolManifest as { tools?: FrontendToolDescriptorV1[] } | undefined
+        body.clientToolManifest as
+          { tools?: FrontendToolDescriptorV1[] } | undefined
       )?.tools;
       try {
         assertRegisterableClientTools(manifestTools ?? []);

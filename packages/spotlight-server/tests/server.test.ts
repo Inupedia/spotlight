@@ -58,14 +58,16 @@ describe("Spotlight Server metadata", () => {
             projectId: "test-project",
             frontendBuildId: "sha",
             manifestDigest: "digest",
-            tools: [{
-              name: "panel.openVideo",
-              version: "1",
-              description: "打开视频",
-              inputSchema: { type: "object" },
-              sideEffect: "ui",
-              replayPolicy: "never",
-            }],
+            tools: [
+              {
+                name: "panel.openVideo",
+                version: "1",
+                description: "打开视频",
+                inputSchema: { type: "object" },
+                sideEffect: "ui",
+                replayPolicy: "never",
+              },
+            ],
           },
           skills: [
             {
@@ -89,9 +91,60 @@ describe("Spotlight Server metadata", () => {
         tools: [{ name: "panel.openVideo", status: "ready" }],
         skills: [
           { name: "video", status: "ready", missingTools: [] },
-          { name: "broken", status: "missing", missingTools: ["panel.notRegistered"] },
+          {
+            name: "broken",
+            status: "missing",
+            missingTools: ["panel.notRegistered"],
+          },
         ],
       });
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe("Spotlight video relay sessions", () => {
+  it("mints signed playback URLs only for configured stream IDs", async () => {
+    const app = await buildServer({
+      runManager: {} as RunManager,
+      projectId: "test-project",
+      apiKeys: ["test-key"],
+      mediaTokenSecret: "test-secret",
+      videoStreams: [
+        { id: "camera-1", url: "ws://127.0.0.1:18081/live/camera-1.flv" },
+      ],
+    });
+
+    try {
+      const unauthenticated = await app.inject({
+        method: "POST",
+        url: "/v1/media/camera-1/session",
+      });
+      const missing = await app.inject({
+        method: "POST",
+        url: "/v1/media/not-configured/session",
+        headers: { "x-spotlight-api-key": "test-key" },
+      });
+      const session = await app.inject({
+        method: "POST",
+        url: "/v1/media/camera-1/session",
+        headers: { "x-spotlight-api-key": "test-key" },
+      });
+
+      expect(unauthenticated.statusCode).toBe(401);
+      expect(missing.statusCode).toBe(404);
+      expect(session.statusCode).toBe(200);
+      expect(session.json().playbackUrl).toMatch(
+        /^\/v1\/media\/camera-1\?token=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u,
+      );
+
+      const invalidToken = await app.inject({
+        method: "GET",
+        url: "/v1/media/camera-1?token=bad-token",
+      });
+      expect(invalidToken.statusCode).toBe(401);
+      expect(invalidToken.json().error.code).toBe("INVALID_VIDEO_SESSION");
     } finally {
       await app.close();
     }

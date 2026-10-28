@@ -1,5 +1,9 @@
 #!/usr/bin/env node
-import { createAgentModel, createRouterModel, fetchAvailableModels } from "./model.js";
+import {
+  createAgentModel,
+  createRouterModel,
+  fetchAvailableModels,
+} from "./model.js";
 import { createMemoryRuntime } from "./memory.js";
 import { loadProjectPack } from "./project.js";
 import { LangChainIntentRouter } from "./router.js";
@@ -8,18 +12,27 @@ import { buildServer } from "./server.js";
 import { SpotlightDurableState } from "./durableState.js";
 import { pathToFileURL } from "node:url";
 
-function required(env: NodeJS.ProcessEnv, name: string, fallbackName?: string): string {
-  const value = env[name]?.trim() || (fallbackName ? env[fallbackName]?.trim() : "");
-  if (!value) throw new Error(`${name}${fallbackName ? ` or ${fallbackName}` : ""} is required`);
+function required(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  fallbackName?: string,
+): string {
+  const value =
+    env[name]?.trim() || (fallbackName ? env[fallbackName]?.trim() : "");
+  if (!value)
+    throw new Error(
+      `${name}${fallbackName ? ` or ${fallbackName}` : ""} is required`,
+    );
   return value;
 }
 
-export function parseCorsOrigin(
-  value: string | undefined,
-): string | string[] {
+export function parseCorsOrigin(value: string | undefined): string | string[] {
   const raw = value?.trim() || "*";
   if (raw === "*") return "*";
-  const parts = raw.split(",").map((item) => item.trim()).filter(Boolean);
+  const parts = raw
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
   if (parts.length === 0) return "*";
   return parts.length === 1 ? parts[0]! : parts;
 }
@@ -52,11 +65,7 @@ export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
     throw new Error(`Unsupported SPOTLIGHT_LLM_PROVIDER: ${provider}`);
   }
   const modelConfig = {
-    apiKey: required(
-      env,
-      "SPOTLIGHT_LLM_API_KEY",
-      selectedProvider.apiKey,
-    ),
+    apiKey: required(env, "SPOTLIGHT_LLM_API_KEY", selectedProvider.apiKey),
     baseURL:
       env.SPOTLIGHT_LLM_BASE_URL ??
       env[selectedProvider.baseURL] ??
@@ -74,15 +83,9 @@ export function resolveModelConfigs(env: NodeJS.ProcessEnv = process.env) {
     timeoutMs: Number(env.SPOTLIGHT_LLM_TIMEOUT_MS ?? 45_000),
   };
   const routerConfig = {
-    apiKey:
-      env.SPOTLIGHT_ROUTER_API_KEY?.trim() ||
-      modelConfig.apiKey,
-    baseURL:
-      env.SPOTLIGHT_ROUTER_BASE_URL ??
-      modelConfig.baseURL,
-    model:
-      env.SPOTLIGHT_ROUTER_MODEL ??
-      modelConfig.model,
+    apiKey: env.SPOTLIGHT_ROUTER_API_KEY?.trim() || modelConfig.apiKey,
+    baseURL: env.SPOTLIGHT_ROUTER_BASE_URL ?? modelConfig.baseURL,
+    model: env.SPOTLIGHT_ROUTER_MODEL ?? modelConfig.model,
     routerModel: env.SPOTLIGHT_ROUTER_MODEL,
     timeoutMs: Number(env.SPOTLIGHT_ROUTER_TIMEOUT_MS ?? 20_000),
   };
@@ -127,12 +130,17 @@ export async function main(): Promise<void> {
     checkpointer: memory.checkpointer,
     store: memory.store,
     durableState,
-    hostActionTimeoutMs: Number(process.env.SPOTLIGHT_HOST_ACTION_TIMEOUT_MS ?? 30_000),
+    hostActionTimeoutMs: Number(
+      process.env.SPOTLIGHT_HOST_ACTION_TIMEOUT_MS ?? 30_000,
+    ),
   });
   const app = await buildServer({
     runManager: manager,
     projectId: project.projectId,
-    apiKeys: (process.env.SPOTLIGHT_API_KEYS ?? "").split(",").map((item) => item.trim()).filter(Boolean),
+    apiKeys: (process.env.SPOTLIGHT_API_KEYS ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean),
     corsOrigin: parseCorsOrigin(process.env.CORS_ORIGIN),
     uiPrompts: project.uiPrompts,
     modelCatalog: async () => {
@@ -146,6 +154,7 @@ export async function main(): Promise<void> {
     },
     defaultModel: modelConfig.model,
     videoChannels: project.videoChannels,
+    videoStreams: project.videoStreams,
     durableState,
     capabilitySessionTtlMs: Number(
       process.env.SPOTLIGHT_CAPABILITY_SESSION_TTL_MS ?? 24 * 60 * 60_000,

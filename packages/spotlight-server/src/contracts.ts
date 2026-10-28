@@ -138,6 +138,8 @@ export interface ProjectPack {
   serverTools: SpotlightServerTool[];
   uiPrompts?: Record<string, unknown>;
   videoChannels?: Array<{ id: string; name: string; aliases: string[] }>;
+  /** Server-only, explicit allowlist for live video stream relays. */
+  videoStreams?: Array<{ id: string; url: string }>;
   /**
    * Compact, server-side catalogs used to resolve named UI targets before the
    * LLM router. This keeps large target sets out of prompts while making exact

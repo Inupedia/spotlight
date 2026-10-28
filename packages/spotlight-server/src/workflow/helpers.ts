@@ -1,3 +1,4 @@
+import { isSpotlightToolResultEnvelope } from "@inupedia/spotlight-protocol";
 import type { FrontendToolDescriptorV1 } from "@inupedia/spotlight-protocol";
 import type { IntentDecision, KnowledgeEvidence } from "../contracts.js";
 import type { prepareRunSkills } from "../skills.js";
@@ -92,12 +93,43 @@ export function toolErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function explicitActionReply(output: unknown): string | undefined {
+  let value = output;
+  let originalText: string | undefined;
+  if (typeof value === "string") {
+    originalText = value.trim();
+    if (!originalText) return undefined;
+    try {
+      value = JSON.parse(originalText);
+    } catch {
+      return originalText;
+    }
+  }
+
+  if (!isSpotlightToolResultEnvelope(value)) return originalText;
+  if (!value.success) return value.error.message;
+  if (typeof value.data === "string" && value.data.trim()) {
+    return value.data.trim();
+  }
+  const text = value.content
+    .filter((item) => item.type === "text")
+    .map((item) => item.text.trim())
+    .filter(Boolean)
+    .join("\n");
+  return text || originalText;
+}
+
 export function actionReplyFromToolOutput(
   descriptor: FrontendToolDescriptorV1,
   output: unknown,
 ): string {
+  // A client action may decline an operation after checking local state (for
+  // example, an unavailable camera). Preserve that explicit user-facing result
+  // instead of replacing it with the generic "completed" message.
+  const explicitReply = explicitActionReply(output);
+  if (explicitReply) return explicitReply;
   if (descriptor.sideEffect === "none") {
-    return typeof output === "string" ? output : String(output ?? "");
+    return typeof output === "string" ? output : JSON.stringify(output ?? "");
   }
   if (output && typeof output === "object") {
     const record = output as Record<string, unknown>;
