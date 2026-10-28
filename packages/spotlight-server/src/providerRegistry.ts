@@ -77,9 +77,11 @@ export function createDefaultProviderRegistry(): SpotlightProviderRegistry {
         new YuxiKnowledgeProvider({
           baseUrl: text(config, "baseUrl", true)!,
           apiKey: text(config, "apiKey"),
+          agentApiKey: text(config, "agentApiKey"),
           username: text(config, "username"),
           password: text(config, "password"),
           agentSlug: text(config, "agentSlug"),
+          agentModel: text(config, "agentModel"),
           timeoutMs:
             typeof config.timeoutMs === "number" ? config.timeoutMs : undefined,
         }),

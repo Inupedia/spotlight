@@ -52,11 +52,12 @@ type ProjectModule = {
 
 function interpolateEnvironment(source: string): string {
   return source.replace(
-    /\$\{([A-Z][A-Z0-9_]*)(:-)?\}/gu,
-    (_match, name: string, optional: string | undefined) => {
+    /\$\{([A-Z][A-Z0-9_]*)(?::-([^}]*))?\}/gu,
+    (_match, name: string, defaultValue: string | undefined) => {
       const value = process.env[name];
-      if (value != null) return value;
-      if (optional) return "";
+      if (value != null && (defaultValue === undefined || value !== ""))
+        return value;
+      if (defaultValue !== undefined) return defaultValue;
       throw new Error(
         `Environment variable ${name} is required by project config`,
       );

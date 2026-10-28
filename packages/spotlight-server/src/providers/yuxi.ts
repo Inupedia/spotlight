@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import type {
   KnowledgeEvidence,
   KnowledgeProvider,
@@ -5,54 +6,48 @@ import type {
 } from "../contracts.js";
 import {
   applyYuxiStreamChunk,
-  collectYuxiStreamChunks,
   type YuxiToolCallState,
 } from "../yuxiStreamTools.js";
 import {
   buildYuxiResumeInput,
-  isYuxiInterruptStatus,
   parseYuxiInterrupt,
   YUXI_MAX_INTERRUPT_RESUMES,
   YUXI_TOOL_APPROVAL_MODE,
-  type YuxiInterrupt,
 } from "../yuxiInterrupts.js";
 
 export interface YuxiProviderOptions {
   baseUrl: string;
   apiKey?: string;
+  /** Yuxi Agents Public API key; Yuxi requires it to have an APP ID. */
+  agentApiKey?: string;
   username?: string;
   password?: string;
   agentSlug?: string;
+  /** Optional Yuxi session model override when its configured default is unavailable. */
+  agentModel?: string;
   /** Hard deadline for one knowledge search, including auth and streaming. */
   timeoutMs?: number;
-}
-
-interface YuxiRunResponse {
-  run_id?: string;
-  stream_url?: string;
 }
 
 interface YuxiStreamOutcome {
   content: string;
   status: string;
-  interrupt: YuxiInterrupt | null;
+  turnId?: string;
+  waitpoint?: Record<string, unknown>;
+  error?: string;
 }
 
-interface YuxiKnowledgeBase {
-  kb_id?: string;
-  id?: string;
-  name?: string;
-  description?: string;
+interface YuxiSessionState {
+  threadId: string;
+  cursor?: string;
 }
 
-interface YuxiKnowledgeSearchResult {
-  content?: string;
-  metadata?: Record<string, unknown>;
-}
-
-interface YuxiKnowledgeSearchResponse {
-  results?: YuxiKnowledgeSearchResult[];
-}
+const YUXI_KNOWLEDGE_RETRIEVAL_TOOLS = new Set([
+  "query_kb",
+  "search_file",
+  "find_kb_document",
+  "open_kb_document",
+]);
 
 function publicYuxiTitle(content: string): string {
   const heading = content.match(/^#{1,6}\s+(.+)$/mu)?.[1]?.trim();
@@ -60,11 +55,67 @@ function publicYuxiTitle(content: string): string {
   return "项目资料";
 }
 
+function yuxiAgentRequestError(
+  path: string,
+  status: number,
+  payload: unknown,
+): Error {
+  const root = asRecord(payload);
+  const detail = asRecord(root?.detail);
+  const code = typeof detail?.code === "string" ? detail.code : undefined;
+  const message =
+    (typeof detail?.message === "string" && detail.message) ||
+    (typeof root?.detail === "string" && root.detail) ||
+    (typeof root?.message === "string" && root.message) ||
+    undefined;
+  const reason = [code, message].filter(Boolean).join(": ").slice(0, 300);
+  if (
+    (path === "/api/v1/agents" || path.startsWith("/api/v1/agents/")) &&
+    (status === 401 || status === 403)
+  ) {
+    return new Error(
+      `Yuxi Agents Public API failed: ${status}. Use Yuxi service-account credentials with Agent and knowledge-base access, or an Agents API key with an APP ID; Knowledge-only keys cannot run an Agent.`,
+    );
+  }
+  const api =
+    path === "/api/v1/agents" || path.startsWith("/api/v1/agents/")
+      ? "Yuxi Agents Public API"
+      : `Yuxi ${path}`;
+  return new Error(
+    `${api} failed on ${path}: ${status}${reason ? ` (${reason})` : ""}`,
+  );
+}
+
+function outputText(items: unknown): string {
+  if (!Array.isArray(items)) return "";
+  return items
+    .flatMap((value) => {
+      if (!value || typeof value !== "object") return [];
+      const item = value as Record<string, unknown>;
+      if (item.type !== "message" || item.role !== "assistant") return [];
+      if (item.phase && item.phase !== "final_answer") return [];
+      if (!Array.isArray(item.content)) return [];
+      return item.content.flatMap((part) => {
+        if (!part || typeof part !== "object") return [];
+        const content = part as Record<string, unknown>;
+        return content.type === "output_text" && typeof content.text === "string"
+          ? [content.text]
+          : [];
+      });
+    })
+    .join("");
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
 export class YuxiKnowledgeProvider implements KnowledgeProvider {
   readonly id = "yuxi";
   private token: string | null = null;
-  private agentId: string | null = null;
-  private readonly threadIds = new Map<string, string>();
+  private readonly sessions = new Map<string, YuxiSessionState>();
 
   constructor(private readonly options: YuxiProviderOptions) {}
 
@@ -94,104 +145,110 @@ export class YuxiKnowledgeProvider implements KnowledgeProvider {
   }
 
   private async auth(signal?: AbortSignal): Promise<string> {
-    if (this.options.apiKey) return `Bearer ${this.options.apiKey}`;
+    if (this.options.agentApiKey) return `Bearer ${this.options.agentApiKey}`;
     if (this.token) return `Bearer ${this.token}`;
-    if (!this.options.username || !this.options.password) {
-      throw new Error("Yuxi requires apiKey or username/password");
+    if (this.options.username && this.options.password) {
+      const response = await fetch(this.base("/api/auth/token"), {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+          username: this.options.username,
+          password: this.options.password,
+        }),
+        signal,
+      });
+      const payload = (await response.json().catch(() => ({}))) as {
+        access_token?: string;
+      };
+      if (!response.ok || !payload.access_token)
+        throw new Error(`Yuxi auth failed: ${response.status}`);
+      this.token = payload.access_token;
+      return `Bearer ${this.token}`;
     }
-    const response = await fetch(this.base("/api/auth/token"), {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        username: this.options.username,
-        password: this.options.password,
-      }),
-      signal,
-    });
-    const payload = (await response.json().catch(() => ({}))) as {
-      access_token?: string;
-    };
-    if (!response.ok || !payload.access_token)
-      throw new Error(`Yuxi auth failed: ${response.status}`);
-    this.token = payload.access_token;
-    return `Bearer ${this.token}`;
+    if (this.options.apiKey) return `Bearer ${this.options.apiKey}`;
+    throw new Error(
+      "Yuxi requires agentApiKey, username/password, or apiKey",
+    );
   }
 
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
+    const headers = new Headers(init?.headers);
+    if (init?.body && !headers.has("Content-Type"))
+      headers.set("Content-Type", "application/json");
+    headers.set("Authorization", await this.auth(init?.signal ?? undefined));
     const response = await fetch(this.base(path), {
       ...init,
-      headers: {
-        ...(init?.body ? { "Content-Type": "application/json" } : {}),
-        Authorization: await this.auth(init?.signal ?? undefined),
-        ...init?.headers,
-      },
+      headers,
     });
-    if (!response.ok)
-      throw new Error(`Yuxi ${path} failed: ${response.status}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw yuxiAgentRequestError(path, response.status, payload);
+    }
     return response.json() as Promise<T>;
   }
 
   private async session(
     sessionId: string,
+    projectId: string,
     signal?: AbortSignal,
-  ): Promise<{ agentId: string; threadId: string }> {
-    const existingThreadId = this.threadIds.get(sessionId);
-    if (this.agentId && existingThreadId)
-      return { agentId: this.agentId, threadId: existingThreadId };
-    const agentId =
-      this.agentId ??
-      this.options.agentSlug ??
-      (
-        await this.json<{
-          slug?: string;
-          agent_id?: string;
-          default_agent_id?: string;
-          agent?: { slug?: string; agent_id?: string };
-        }>("/api/agent/default", { signal })
-      ).agent?.slug;
-    if (!agentId) throw new Error("Yuxi default agent is unavailable");
-    const thread = await this.json<{ id?: string; thread_id?: string }>(
-      "/api/chat/thread",
+  ): Promise<YuxiSessionState> {
+    const existing = this.sessions.get(sessionId);
+    if (existing) return existing;
+    const agentId = this.options.agentSlug?.trim() || "default-chatbot";
+    const agentModel = this.options.agentModel?.trim();
+    const idempotencyKey = `spotlight-session-${createHash("sha256")
+      .update(sessionId)
+      .digest("hex")}`;
+    const session = await this.json<{ id?: string }>(
+      "/api/v1/agents/sessions",
       {
         method: "POST",
         body: JSON.stringify({
           agent_id: agentId,
-          title: "Spotlight knowledge",
-          metadata: {
-            source: "spotlight-server",
-            spotlight_session_id: sessionId,
-          },
+          title: `Spotlight knowledge · ${projectId}`,
+          tool_approval_mode: YUXI_TOOL_APPROVAL_MODE,
+          ...(agentModel ? { agent: { model: agentModel } } : {}),
         }),
+        headers: { "Idempotency-Key": idempotencyKey },
         signal,
       },
     );
-    const threadId = thread.id ?? thread.thread_id;
+    const threadId = session.id;
     if (!threadId) throw new Error("Yuxi thread creation failed");
-    this.agentId = agentId;
-    this.threadIds.set(sessionId, threadId);
-    return { agentId, threadId };
+    const result = { threadId };
+    this.sessions.set(sessionId, result);
+    return result;
   }
 
   private async consumeStream(
-    streamUrl: string,
+    session: YuxiSessionState,
+    sessionPath: string,
     input: KnowledgeQuery,
     toolState: Map<string, YuxiToolCallState>,
   ): Promise<YuxiStreamOutcome> {
-    const response = await fetch(this.base(streamUrl), {
-      headers: { Authorization: await this.auth(input.signal) },
+    const headers = new Headers({
+      Authorization: await this.auth(input.signal),
+    });
+    if (session.cursor) headers.set("Last-Event-ID", session.cursor);
+    const response = await fetch(this.base(`${sessionPath}/events`), {
+      headers,
       signal: input.signal,
     });
-    if (!response.ok) throw new Error(`Yuxi stream failed: ${response.status}`);
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw yuxiAgentRequestError(
+        `${sessionPath}/events`,
+        response.status,
+        payload,
+      );
+    }
     const chunks: string[] = [];
     const reader = response.body?.getReader();
     if (!reader) throw new Error("Yuxi stream has no response body");
     const decoder = new TextDecoder();
     let buffer = "";
-    let terminal = false;
-    let status = "completed";
-    let interrupt: YuxiInterrupt | null = null;
     try {
-      while (!terminal) {
+      while (true) {
         const { done, value } = await reader.read();
         if (value) {
           buffer += decoder
@@ -207,48 +264,141 @@ export class YuxiKnowledgeProvider implements KnowledgeProvider {
         buffer = frames.pop() ?? "";
         for (const frame of frames) {
           let eventType = "message";
+          let cursor: string | undefined;
           const dataLines: string[] = [];
           for (const line of frame.split("\n")) {
             if (line.startsWith("event:"))
               eventType = line.slice(6).trim() || "message";
+            if (line.startsWith("id:")) cursor = line.slice(3).trim();
             if (line.startsWith("data:"))
               dataLines.push(line.slice(5).trimStart());
           }
           if (!dataLines.length) continue;
-          const envelope = JSON.parse(dataLines.join("\n")) as Record<
+          const event = JSON.parse(dataLines.join("\n")) as Record<
             string,
             unknown
           >;
-          const payload = envelope.payload as
-            Record<string, unknown> | undefined;
-          for (const item of collectYuxiStreamChunks(envelope)) {
-            const streamEvent = item.stream_event;
+          if (cursor) session.cursor = cursor;
+          const type = typeof event.type === "string" ? event.type : eventType;
+
+          if (type === "agent.session.turn.output_text.delta") {
+            if (typeof event.delta === "string") chunks.push(event.delta);
+          } else if (type === "agent.session.turn.item.added") {
+            const item = asRecord(event.item);
+            if (item?.type === "function_call" && input.onToolEvent) {
+              const id = String(item.call_id ?? item.id ?? "");
+              const name = String(item.name ?? "");
+              if (id && name) {
+                const toolChunk = {
+                  msg: {
+                    tool_calls: [
+                      {
+                        id,
+                        name,
+                        args: item.arguments,
+                      },
+                    ],
+                  },
+                };
+                for (const toolEvent of applyYuxiStreamChunk(
+                  toolState,
+                  toolChunk,
+                )) {
+                  input.onToolEvent(toolEvent);
+                }
+              }
+            }
+          } else if (type === "agent.session.turn.item.done") {
+            const item = asRecord(event.item);
             if (
-              streamEvent?.type === "message_delta" &&
-              typeof streamEvent.content === "string"
+              item?.type === "function_call_output" &&
+              input.onToolEvent
             ) {
-              chunks.push(streamEvent.content);
+              const id = String(item.call_id ?? "");
+              const tool = toolState.get(id);
+              const error = item.error;
+              const output = item.output ?? error ?? null;
+              const toolChunk = {
+                msg: {
+                  type: "tool",
+                  name: tool?.name ?? id ?? "knowledge_tool",
+                  tool_call_id: id,
+                  content: output,
+                },
+              };
+              for (const toolEvent of applyYuxiStreamChunk(
+                toolState,
+                toolChunk,
+              )) {
+                if (toolEvent.type !== "result") {
+                  input.onToolEvent(toolEvent);
+                } else {
+                  const failed = item.status === "failed";
+                  input.onToolEvent({
+                    ...toolEvent,
+                    success: !failed,
+                    summary: failed
+                      ? `${tool?.name ?? "知识库工具"} 执行失败`
+                      : toolEvent.summary,
+                    ...(failed
+                      ? {
+                          error:
+                            typeof error === "string"
+                              ? error
+                              : JSON.stringify(error ?? "Yuxi tool failed"),
+                        }
+                      : {}),
+                  });
+                }
+              }
             }
-            if (!input.onToolEvent) continue;
-            for (const event of applyYuxiStreamChunk(toolState, item)) {
-              input.onToolEvent(event);
-            }
-          }
-          if (eventType === "interrupt") {
-            interrupt = parseYuxiInterrupt(eventType, envelope) ?? interrupt;
-          }
-          if (eventType === "error") {
+          } else if (type === "yuxi.session.turn.waiting") {
+            const waitpoint = asRecord(event.waitpoint);
+            const turn = asRecord(event.turn);
+            return {
+              content: chunks.join(""),
+              status: "requires_action",
+              turnId:
+                (typeof turn?.id === "string" && turn.id) ||
+                (typeof event.turn_id === "string" ? event.turn_id : undefined),
+              waitpoint,
+            };
+          } else if (type === "agent.session.turn.completed") {
+            const turn = asRecord(event.turn);
+            return {
+              content: chunks.join(""),
+              status: "completed",
+              turnId:
+                (typeof event.turn_id === "string" && event.turn_id) ||
+                (typeof turn?.id === "string" ? turn.id : undefined),
+            };
+          } else if (
+            type === "agent.session.turn.failed" ||
+            type === "agent.session.turn.cancelled"
+          ) {
+            const turn = asRecord(event.turn);
+            const error = asRecord(turn?.error);
+            return {
+              content: chunks.join(""),
+              status:
+                type === "agent.session.turn.failed" ? "failed" : "cancelled",
+              turnId:
+                (typeof event.turn_id === "string" && event.turn_id) ||
+                (typeof turn?.id === "string" ? turn.id : undefined),
+              error:
+                typeof error?.message === "string"
+                  ? error.message
+                  : undefined,
+            };
+          } else if (type === "error") {
+            const yuxiError = asRecord(event.error);
             throw new Error(
-              String(payload?.message ?? envelope.message ?? "Yuxi run failed"),
+              String(
+                event.message ??
+                  yuxiError?.message ??
+                  "Yuxi Agent session failed",
+              ),
             );
-          }
-          if (eventType === "end") {
-            status = String(payload?.status ?? "completed");
-            if (!interrupt && isYuxiInterruptStatus(status)) {
-              interrupt = parseYuxiInterrupt(eventType, envelope);
-            }
-            terminal = true;
-            break;
           }
         }
         if (done) break;
@@ -256,191 +406,176 @@ export class YuxiKnowledgeProvider implements KnowledgeProvider {
     } finally {
       await reader.cancel().catch(() => undefined);
     }
-    if (!terminal) throw new Error("Yuxi stream ended before a terminal event");
-    return { content: chunks.join(""), status, interrupt };
+    throw new Error("Yuxi Agent event stream ended before a turn result");
   }
 
-  private async searchPublicKnowledge(
-    input: KnowledgeQuery,
-  ): Promise<KnowledgeEvidence[] | null> {
-    let knowledgeBases: YuxiKnowledgeBase[];
-    try {
-      const payload = await this.json<
-        YuxiKnowledgeBase[] | { knowledge_bases?: YuxiKnowledgeBase[] }
-      >("/api/v1/knowledge/tools/list_kbs", { signal: input.signal });
-      knowledgeBases = Array.isArray(payload)
-        ? payload
-        : (payload.knowledge_bases ?? []);
-    } catch (error) {
-      // Yuxi 0.7 does not expose the versioned Public API; retain its agent
-      // adapter as a compatibility path for installations that still use it.
-      if (
-        error instanceof Error &&
-        error.message.includes("/api/v1/knowledge/tools/list_kbs failed: 404")
-      ) {
-        return null;
-      }
-      throw error;
-    }
-
-    const toolCall = {
-      id: `yuxi-knowledge-${Date.now()}`,
-      name: "project_knowledge_search",
-      input: { query: input.query },
-      displayName: "查询项目知识库",
-    };
-    input.onToolEvent?.({
-      type: "start",
-      call: toolCall,
+  private async submitEvent(
+    session: YuxiSessionState,
+    event: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<void> {
+    const sessionPath = `/api/v1/agents/sessions/${encodeURIComponent(session.threadId)}`;
+    await this.json(`${sessionPath}/events`, {
+      method: "POST",
+      headers: { "Idempotency-Key": `spotlight-${randomUUID()}` },
+      body: JSON.stringify({ events: [event] }),
+      signal,
     });
-
-    const visible = knowledgeBases.filter(
-      (kb): kb is YuxiKnowledgeBase & { kb_id: string } =>
-        typeof (kb.kb_id ?? kb.id) === "string" &&
-        Boolean((kb.kb_id ?? kb.id)?.trim()),
-    );
-    if (!visible.length) {
-      input.onToolEvent?.({
-        type: "result",
-        call: toolCall,
-        success: true,
-        summary: "当前账号没有可检索的知识库",
-        output: { knowledgeBaseCount: 0, resultCount: 0 },
-      });
-      return [];
-    }
-
-    input.onToolEvent?.({
-      type: "progress",
-      call: toolCall,
-      summary: `正在检索 ${visible.length} 个可访问知识库`,
-    });
-
-    const searches = await Promise.allSettled(
-      visible.map(async (kb) => {
-        const kbId = kb.kb_id ?? kb.id!;
-        const response = await this.json<YuxiKnowledgeSearchResponse>(
-          "/api/v1/knowledge/tools/query_kb",
-          {
-            method: "POST",
-            body: JSON.stringify({ kb_id: kbId, query_text: input.query }),
-            signal: input.signal,
-          },
-        );
-        return (response.results ?? []).flatMap((result) => {
-          if (typeof result.content !== "string" || !result.content.trim())
-            return [];
-          const metadata = result.metadata ?? {};
-          const source =
-            typeof metadata.source === "string" ? metadata.source : undefined;
-          const score =
-            typeof metadata.score === "number" ? metadata.score : undefined;
-          return [
-            {
-              content: result.content,
-              title: source ? `${kb.name ?? "项目资料"} · ${source}` : kb.name,
-              score,
-              metadata: {
-                ...metadata,
-                provider: this.id,
-                kbId,
-                kbName: kb.name,
-              },
-            } satisfies KnowledgeEvidence,
-          ];
-        });
-      }),
-    );
-
-    const evidence: KnowledgeEvidence[] = [];
-    const errors: Error[] = [];
-    for (const search of searches) {
-      if (search.status === "fulfilled") evidence.push(...search.value);
-      else if (search.reason instanceof Error) errors.push(search.reason);
-    }
-    if (!evidence.length && errors.length) throw errors[0];
-
-    evidence.sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
-    const limit = Math.max(1, Math.min(20, Math.trunc(input.limit ?? 8)));
-    const selected = evidence.slice(0, limit);
-    input.onToolEvent?.({
-      type: "result",
-      call: toolCall,
-      success: true,
-      summary: `从 ${visible.length} 个知识库检索到 ${selected.length} 条资料`,
-      output: {
-        knowledgeBaseCount: visible.length,
-        resultCount: selected.length,
-      },
-    });
-    return selected;
   }
 
   private async searchViaAgent(
     input: KnowledgeQuery,
   ): Promise<KnowledgeEvidence[]> {
-    const session = await this.session(input.sessionId, input.signal);
+    const session = await this.session(
+      input.sessionId,
+      input.projectId,
+      input.signal,
+    );
+    const sessionPath = `/api/v1/agents/sessions/${encodeURIComponent(session.threadId)}`;
     const toolState = new Map<string, YuxiToolCallState>();
     const contentParts: string[] = [];
-    let parentRunId: string | undefined;
-    let resume: Record<string, unknown> | undefined;
+    let knowledgeQuerySucceeded = false;
+    const streamInput: KnowledgeQuery = {
+      ...input,
+      onToolEvent: (event) => {
+        if (
+          event.type === "result" &&
+          event.success &&
+          YUXI_KNOWLEDGE_RETRIEVAL_TOOLS.has(event.call.name)
+        ) {
+          knowledgeQuerySucceeded = true;
+        }
+        input.onToolEvent?.(event);
+      },
+    };
+    await this.submitEvent(
+      session,
+      {
+        type: "agent.session.input.message",
+        input: [
+          {
+            role: "user",
+            content: [{ type: "input_text", text: input.query }],
+          },
+        ],
+        yuxi: { tool_approval_mode: YUXI_TOOL_APPROVAL_MODE },
+      },
+      input.signal,
+    );
 
     for (let attempt = 0; attempt <= YUXI_MAX_INTERRUPT_RESUMES; attempt += 1) {
-      const run = await this.json<YuxiRunResponse>("/api/agent/runs", {
-        method: "POST",
-        body: JSON.stringify({
-          query: resume ? undefined : input.query,
-          agent_slug: session.agentId,
-          thread_id: session.threadId,
-          tool_approval_mode: YUXI_TOOL_APPROVAL_MODE,
-          resume,
-          created_by_run_id: resume ? parentRunId : undefined,
-          meta: {
-            source: "spotlight-server",
-            projectId: input.projectId,
-          },
-        }),
-        signal: input.signal,
-      });
-      if (!run.stream_url) throw new Error("Yuxi run returned no stream URL");
-      parentRunId = run.run_id ?? parentRunId;
       const outcome = await this.consumeStream(
-        run.stream_url,
-        input,
+        session,
+        sessionPath,
+        streamInput,
         toolState,
       );
       if (outcome.content) contentParts.push(outcome.content);
       if (outcome.status === "completed") {
-        const content = contentParts.join("").trim();
+        if (!knowledgeQuerySucceeded) {
+          throw new Error(
+            "Yuxi Agent completed without successfully querying a knowledge-base retrieval tool",
+          );
+        }
+        let content = contentParts.join("").trim();
+        if (!content && outcome.turnId) {
+          const turn = await this.json<{
+            yuxi?: { output?: unknown };
+          }>(`${sessionPath}/turns/${encodeURIComponent(outcome.turnId)}`, {
+            signal: input.signal,
+          });
+          content = outputText(turn.yuxi?.output).trim();
+        }
         if (!content) throw new Error("Yuxi returned no answer content");
         return [
           {
             content,
             title: publicYuxiTitle(content),
-            metadata: { provider: this.id, runId: parentRunId },
+            metadata: {
+              provider: this.id,
+              threadId: session.threadId,
+              turnId: outcome.turnId,
+            },
           },
         ];
       }
       if (
-        !outcome.interrupt ||
-        !parentRunId ||
+        outcome.status !== "requires_action" ||
+        !outcome.turnId ||
+        !outcome.waitpoint ||
         attempt === YUXI_MAX_INTERRUPT_RESUMES
       ) {
-        throw new Error(`Yuxi run ended with status ${outcome.status}`);
+        throw new Error(
+          outcome.error || `Yuxi Agent turn ended with status ${outcome.status}`,
+        );
       }
-      resume = buildYuxiResumeInput(outcome.interrupt);
+
+      const waitpoint = outcome.waitpoint;
+      const interrupt = parseYuxiInterrupt("interrupt", {
+        payload: {
+          status: waitpoint.kind,
+          questions: waitpoint.questions,
+          approval: { action_requests: waitpoint.calls },
+        },
+      });
+      if (!interrupt) throw new Error("Yuxi Agent returned an unknown waitpoint");
+      let response: Record<string, unknown>;
+      if (interrupt.kind === "human_approval") {
+        const calls = Array.isArray(waitpoint.calls) ? waitpoint.calls : [];
+        response = {
+          type: "approval",
+          decisions: calls.flatMap((value) => {
+            const call = asRecord(value);
+            const callId = call?.call_id ?? call?.id;
+            return typeof callId === "string"
+              ? [{ call_id: callId, decision: "approve" }]
+              : [];
+          }),
+        };
+      } else {
+        const questions = Array.isArray(waitpoint.questions)
+          ? waitpoint.questions
+          : [];
+        const answers = buildYuxiResumeInput(interrupt);
+        response = {
+          type: "answer",
+          answers: questions.flatMap((value) => {
+            const question = asRecord(value);
+            const questionId = question?.question_id ?? question?.id;
+            return typeof questionId === "string" && questionId in answers
+              ? [{ question_id: questionId, answer: answers[questionId] }]
+              : [];
+          }),
+        };
+      }
+      const resumeItems = Array.isArray(response.decisions)
+        ? response.decisions
+        : Array.isArray(response.answers)
+          ? response.answers
+          : [];
+      if (!resumeItems.length) {
+        throw new Error("Yuxi Agent returned a waitpoint that cannot be resumed");
+      }
+      await this.submitEvent(
+        session,
+        {
+          type: "yuxi.session.input.resume",
+          turn_id: outcome.turnId,
+          waitpoint_id: String(waitpoint.id ?? ""),
+          response,
+        },
+        input.signal,
+      );
     }
 
-    throw new Error("Yuxi run ended with status interrupted");
+    throw new Error("Yuxi Agent turn remained interrupted");
   }
 
   async search(input: KnowledgeQuery): Promise<KnowledgeEvidence[]> {
     const scoped = this.searchSignal(input.signal);
     const scopedInput = { ...input, signal: scoped.signal };
     try {
-      const publicEvidence = await this.searchPublicKnowledge(scopedInput);
-      if (publicEvidence !== null) return publicEvidence;
-      return this.searchViaAgent(scopedInput);
+      return await this.searchViaAgent(scopedInput);
     } finally {
       scoped.cleanup();
     }
