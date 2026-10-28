@@ -47,6 +47,25 @@ describe("client tools", () => {
     ).resolves.toBe("v13");
   });
 
+  it("normalizes void handler output to JSON null before validation", async () => {
+    const closePanel = defineClientTool(async () => undefined, {
+      name: "closePanel",
+      description: "Close a panel",
+      schema: {
+        input: { type: "object", properties: {}, additionalProperties: false },
+        output: { type: "null" },
+      },
+    });
+    const registry = createClientToolRegistry([closePanel]);
+
+    await expect(registry.execute("closePanel", {})).resolves.toBeNull();
+    await expect(registry.executeResult("closePanel", {})).resolves.toEqual({
+      success: true,
+      content: [{ type: "structured_data", data: null }],
+      data: null,
+    });
+  });
+
   it("derives a tier from the legacy descriptor fields", () => {
     const readTool = defineClientTool(
       async ({ videoId }: { videoId: string }) => videoId,

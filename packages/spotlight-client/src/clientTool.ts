@@ -187,9 +187,16 @@ export function createClientToolRegistry(tools: readonly ClientTool[]) {
           inputValidation.issues,
         );
       }
-      const output = await (
+      const rawOutput = await (
         tool as unknown as ClientToolHandler<unknown, unknown>
       )(input);
+      // JavaScript `void` handlers resolve to undefined, which cannot cross
+      // the JSON tool boundary. The Vite tool metadata maps `void` to the
+      // JSON Schema `null` type, so normalize it before output validation.
+      const output =
+        rawOutput === undefined && descriptor.outputSchema?.type === "null"
+          ? null
+          : rawOutput;
       if (descriptor.outputSchema) {
         const outputValidation = validateJsonSchemaValue(
           output,
