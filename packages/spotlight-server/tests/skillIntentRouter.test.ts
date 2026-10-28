@@ -156,6 +156,14 @@ const clientTools = [
 ];
 
 describe("skill tool route enrichment", () => {
+  it.each(["帮我看下闸口", "帮我看一下闸口", "给我看看便道一"])(
+    "recognizes conversational open requests: %s",
+    (question) => {
+      expect(hasOpenTargetIntent(question)).toBe(true);
+      expect(extractOpenTargetName(question)).toMatch(/(?:闸口|便道一)/u);
+    },
+  );
+
   it("locks an exact named catalog target before semantic Skill routing", () => {
     const skill = {
       name: "skill.monitoring",

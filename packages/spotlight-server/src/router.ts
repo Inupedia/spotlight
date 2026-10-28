@@ -477,16 +477,22 @@ export class LangChainIntentRouter implements IntentRouter {
     clientTools: FrontendToolDescriptorV1[],
     route: SkillRouteResult,
   ): Promise<IntentDecision> {
+    const enrichedRoute = enrichSkillToolRoute(
+      question,
+      route,
+      skills,
+      clientTools,
+    );
     const selected = await this.resolveSkillToolSelection(
       question,
       skills,
       clientTools,
-      route,
+      enrichedRoute,
     );
     return {
-      route: route.route,
-      confidence: route.confidence,
-      reason: route.reason,
+      route: enrichedRoute.route,
+      confidence: enrichedRoute.confidence,
+      reason: enrichedRoute.reason,
       requestedToolNames: selected.requestedToolNames,
       requestedToolInput: selected.requestedToolInput,
       explicitActionEvidence:

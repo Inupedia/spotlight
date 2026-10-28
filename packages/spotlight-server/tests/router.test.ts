@@ -426,6 +426,121 @@ describe("LangChain intent router", () => {
     });
   });
 
+  it("routes the new Spotlight camera example with its target query", async () => {
+    const router = new LangChainIntentRouter(new FakeToolCallingModel());
+    const decision = await router.route(
+      "打开二郎山隧洞1#施工支洞便道_1",
+      [
+        {
+          name: "video_search",
+          namespace: "video",
+          version: "1.0.0",
+          description: "Search 现场视频监控通道及其配置可用性.",
+          inputSchema: { type: "object", properties: {} },
+          sideEffect: "none",
+          replayPolicy: "safe",
+          riskLevel: "low",
+          resource: { namespace: "video", operation: "search", inputKey: "query" },
+        },
+        {
+          name: "playVideoFullscreen",
+          namespace: "video",
+          version: "1.0.0",
+          description: "播放用户指定的视频监控",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", minLength: 1 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          resource: {
+            namespace: "video",
+            operation: "action",
+            action: "play",
+            inputKey: "query",
+          },
+          sideEffect: "ui",
+          replayPolicy: "safe",
+          riskLevel: "low",
+        },
+      ],
+      [
+        {
+          name: "skill.monitoring",
+          description: "现场监控",
+          allowedTools: ["video_search", "playVideoFullscreen"],
+          responseStrategy: "tool_answer",
+          toolExamples: [
+            {
+              example: "打开二郎山隧洞1#施工支洞便道_1",
+              toolName: "playVideoFullscreen",
+            },
+          ],
+        },
+      ],
+    );
+
+    expect(decision).toMatchObject({
+      route: "action",
+      requestedToolNames: ["playVideoFullscreen"],
+      requestedToolInput: { query: "二郎山隧洞1#施工支洞便道_1" },
+    });
+  });
+
+  it("fills a resource action query on a model-selected Skill route", async () => {
+    const model = new FakeToolCallingModel({
+      structuredResponse: {
+        route: "action",
+        matchedSkillNames: ["skill.monitoring"],
+        requestedToolNames: ["playVideoFullscreen"],
+        toolInput: {},
+        confidence: 0.99,
+        reason: "The user explicitly requested playback.",
+      },
+    });
+    const router = new LangChainIntentRouter(model);
+    const decision = await router.route(
+      "播放二郎山隧洞1#施工支洞便道_1",
+      [
+        {
+          name: "playVideoFullscreen",
+          namespace: "video",
+          version: "1.0.0",
+          description: "播放用户指定的视频监控",
+          inputSchema: {
+            type: "object",
+            properties: { query: { type: "string", minLength: 1 } },
+            required: ["query"],
+            additionalProperties: false,
+          },
+          resource: {
+            namespace: "video",
+            operation: "action",
+            action: "play",
+            inputKey: "query",
+          },
+          sideEffect: "ui",
+          replayPolicy: "safe",
+          riskLevel: "low",
+        },
+      ],
+      [
+        {
+          name: "skill.monitoring",
+          description: "现场监控",
+          allowedTools: ["playVideoFullscreen"],
+          responseStrategy: "tool_answer",
+        },
+      ],
+    );
+
+    expect(decision).toMatchObject({
+      route: "action",
+      requestedToolNames: ["playVideoFullscreen"],
+      requestedToolInput: { query: "二郎山隧洞1#施工支洞便道_1" },
+    });
+  });
+
   it("infers a read-only tool when the skill route omits requestedToolNames", async () => {
     const model = new FakeToolCallingModel({
       structuredResponse: {

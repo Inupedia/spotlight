@@ -8,6 +8,7 @@ import { isInternalEvidenceTitle } from "./evidence.js";
 export function routeProgressSummary(
   question: string,
   decision: IntentDecision,
+  selectedTools: FrontendToolDescriptorV1[] = [],
 ): string {
   const request = `“${compactText(question)}”`;
   if (decision.route === "knowledge") {
@@ -16,7 +17,11 @@ export function routeProgressSummary(
     return `识别为知识问答（${source}）：${request}；未检测到需要执行的页面操作。`;
   }
   if (decision.route === "action") {
-    const evidence = decision.explicitActionEvidence
+    const readOnlyQuery =
+      selectedTools.length > 0 &&
+      selectedTools.every((tool) => tool.sideEffect === "none");
+    const routeLabel = readOnlyQuery ? "识别为只读查询" : "识别为页面操作";
+    const evidence = !readOnlyQuery && decision.explicitActionEvidence
       ? `，检测到明确动作“${decision.explicitActionEvidence}”`
       : "";
     const skill = decision.matchedSkillNames?.length
@@ -25,7 +30,10 @@ export function routeProgressSummary(
     const normalization = decision.toolInputNormalization?.length
       ? `；已按 Tool Schema 清理 ${decision.toolInputNormalization.length} 个无效可选字段（${decision.toolInputNormalization.map((item) => item.path).join("、")}）`
       : "";
-    return `识别为页面操作：${request}${evidence}${skill}${normalization}；将只从已注册的客户端工具中选择。`;
+    const executionNote = readOnlyQuery
+      ? "将调用已注册的只读工具。"
+      : "将只从已注册的客户端工具中选择。";
+    return `${routeLabel}：${request}${evidence}${skill}${normalization}；${executionNote}`;
   }
   return `暂不能安全执行：${request}；操作目标或指令不够明确，需要进一步确认。`;
 }

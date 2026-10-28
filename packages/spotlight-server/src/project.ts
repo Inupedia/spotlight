@@ -173,7 +173,7 @@ export async function loadProjectPack(
             {
               skillName: "skill.monitoring",
               toolName: "playVideoFullscreen",
-              inputKey: "videoChannelId",
+              inputKey: "query",
               targets: videoChannels,
             },
           ]

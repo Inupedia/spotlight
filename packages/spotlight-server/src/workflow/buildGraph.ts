@@ -487,6 +487,7 @@ export function compileSpotlightWorkflow(
           lane === "knowledge_then_action"
             ? { ...decision, route: "action" }
             : decision,
+          allowed,
         ),
       );
       return { decision, lane, skipGather: false };
