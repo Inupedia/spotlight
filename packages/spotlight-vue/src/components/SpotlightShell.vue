@@ -13,7 +13,7 @@
   />
   <Live2dPanel
     v-if="avatarEnabled && live2dVisible"
-    :voice-disabled="store.loading || speechPending || voiceStarting"
+    :voice-disabled="speechPending || voiceStarting"
     :voice-error="store.error"
     :phone-pair-available="phonePair.canShow.value"
     :phone-pair-open="phonePair.panelOpen.value"
@@ -105,6 +105,7 @@ const voiceHoldActive = ref(false);
 const speechPending = ref(false);
 const voiceStarting = ref(false);
 const speechAbortController = ref<AbortController | null>(null);
+let speechCaptureGeneration = 0;
 const ttsAbortController = ref<AbortController | null>(null);
 const activeSpeechToken = ref(0);
 const live2dHoldThinkingUntilSpeech = ref(false);
@@ -176,6 +177,7 @@ function clearVoiceHoldTimer() {
 }
 
 function cancelSpeechSession() {
+  speechCaptureGeneration += 1;
   clearVoiceHoldTimer();
   if (speechAbortController.value) {
     speechAbortController.value.abort();
@@ -203,6 +205,26 @@ function stopTtsPlayback() {
   void import("../avatar/spine/live2dApp.js").then((live2d) =>
     live2d.stopLive2dLipSync(),
   );
+}
+
+/**
+ * A newly started voice command owns the active interaction. Cancel the old
+ * graph run and every pending speech effect without touching the new capture.
+ */
+function interruptCurrentTurnForVoice(): void {
+  store.cancelPipeline();
+  store.showThinkingBar = false;
+  activeSpeechToken.value += 1;
+  live2dHoldThinkingUntilSpeech.value = false;
+  voicePlayoutHold.value = false;
+  heldSpokenClip = "";
+  queuedVoiceSentences = 0;
+  spokenClipIndex = 0;
+  activeVoiceTurnId = "";
+  voicePhraseGeneration = 0;
+  voicePlaybackTail = Promise.resolve();
+  voiceController.setPhase("interrupted");
+  stopTtsPlayback();
 }
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
@@ -400,29 +422,27 @@ function enqueueVoiceSentence(sentence: {
   for (const clip of drained.ready) synthesizeSpokenClip(clip);
 }
 
-async function finishVoiceResponseStream(): Promise<void> {
-  const controller = ttsAbortController.value;
-  if (!controller) {
-    voicePlayoutHold.value = false;
-    return;
-  }
-  const speechToken = activeSpeechToken.value;
-  await voicePlaybackTail;
+async function finishVoiceResponseStream(
+  controller: AbortController | null,
+  speechToken: number,
+): Promise<void> {
+  if (!controller || !isLive2dTtsSessionActive(controller, speechToken)) return;
+  const playbackTail = voicePlaybackTail;
+  await playbackTail;
+  if (!isLive2dTtsSessionActive(controller, speechToken)) return;
   live2dHoldThinkingUntilSpeech.value = false;
   const live2d = await import("../avatar/spine/live2dApp.js");
+  if (!isLive2dTtsSessionActive(controller, speechToken)) return;
   live2d.stopLive2dLipSync();
-  if (isLive2dTtsSessionActive(controller, speechToken)) {
-    if (live2dBriefingKeepLastMs.value > 0 && queuedVoiceSentences > 0) {
-      try {
-        await wait(live2dBriefingKeepLastMs.value, controller.signal);
-      } catch {
-        // ignore abort
-      }
-    }
-    if (isLive2dTtsSessionActive(controller, speechToken)) {
-      live2dSpeech.reset();
+  if (live2dBriefingKeepLastMs.value > 0 && queuedVoiceSentences > 0) {
+    try {
+      await wait(live2dBriefingKeepLastMs.value, controller.signal);
+    } catch {
+      // ignore abort
     }
   }
+  if (!isLive2dTtsSessionActive(controller, speechToken)) return;
+  live2dSpeech.reset();
   if (ttsAbortController.value === controller) {
     ttsAbortController.value = null;
   }
@@ -497,16 +517,21 @@ async function playLive2dTtsBlob(
 
 function canAvatarClickToTalk(): boolean {
   if (!props.avatarEnabled || !live2dVisible.value) return false;
-  return !store.loading && !voiceStarting.value && !speechPending.value;
+  return !voiceStarting.value && !speechPending.value;
 }
 
 function canLive2dHiddenVoiceStt(): boolean {
   return canAvatarClickToTalk() && !store.visible;
 }
 
-async function submitVoiceUtterance(text: string): Promise<void> {
+async function submitVoiceUtterance(
+  text: string,
+  source: "microphone" | "phone" = "microphone",
+): Promise<void> {
   const trimmed = text.trim();
   if (!trimmed) return;
+  if (source === "phone") cancelSpeechSession();
+  interruptCurrentTurnForVoice();
   store.prompt = trimmed;
   voiceController.setPhase("thinking");
   beginVoiceResponseStream();
@@ -515,19 +540,28 @@ async function submitVoiceUtterance(text: string): Promise<void> {
   try {
     await store.submit({
       interactionMode: "voice",
-      onVoiceSentence: enqueueVoiceSentence,
+      onVoiceSentence: (sentence) => {
+        if (
+          controller &&
+          isLive2dTtsSessionActive(controller, speechToken)
+        ) {
+          enqueueVoiceSentence(sentence);
+        }
+      },
     });
   } finally {
     const stillThisTurn =
       Boolean(controller) &&
       isLive2dTtsSessionActive(controller!, speechToken);
-    flushHeldSpokenClip();
-    if (stillThisTurn && queuedVoiceSentences === 0) {
-      const reply = latestAssistantReply();
-      if (reply) enqueueFallbackReply(reply);
+    if (stillThisTurn) {
       flushHeldSpokenClip();
+      if (queuedVoiceSentences === 0) {
+        const reply = latestAssistantReply();
+        if (reply) enqueueFallbackReply(reply);
+        flushHeldSpokenClip();
+      }
     }
-    await finishVoiceResponseStream();
+    await finishVoiceResponseStream(controller, speechToken);
     if (stillThisTurn) {
       voiceController.resetTo("idle");
       live2dVoiceChannel.reset();
@@ -537,7 +571,7 @@ async function submitVoiceUtterance(text: string): Promise<void> {
 
 const phonePair = usePhoneVoicePairing({
   enabled: props.avatarEnabled,
-  onUtterance: submitVoiceUtterance,
+  onUtterance: (text) => submitVoiceUtterance(text, "phone"),
 });
 
 async function stopSpeechAndFillPrompt() {
@@ -549,9 +583,11 @@ async function stopSpeechAndFillPrompt() {
   }
   speechPending.value = true;
   const controller = new AbortController();
+  const captureGeneration = speechCaptureGeneration;
   speechAbortController.value = controller;
   try {
     const { text } = await speechService.stopAndTranscribe(controller.signal);
+    if (captureGeneration !== speechCaptureGeneration) return;
     const trimmed = text.trim();
     if (submitAfterTranscribe) {
       sttFromLive2dVoiceChannel.value = false;
@@ -569,11 +605,16 @@ async function stopSpeechAndFillPrompt() {
     if (controller.signal.aborted) return;
     store.error = microphoneAccessMessage(err) || "语音识别失败，请重试。";
   } finally {
-    speechAbortController.value = null;
-    speechPending.value = false;
-    voiceHoldActive.value = false;
-    sttFromLive2dVoiceChannel.value = false;
-    live2dVoiceChannel.reset();
+    if (
+      captureGeneration === speechCaptureGeneration &&
+      speechAbortController.value === controller
+    ) {
+      speechAbortController.value = null;
+      speechPending.value = false;
+      voiceHoldActive.value = false;
+      sttFromLive2dVoiceChannel.value = false;
+      live2dVoiceChannel.reset();
+    }
   }
 }
 
@@ -583,7 +624,6 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
 
   const hiddenThinkingStt = canLive2dHiddenVoiceStt();
   if (!store.visible && !hiddenThinkingStt) return;
-  if (store.visible && store.loading) return;
 
   event.preventDefault();
   if (voiceHoldTimer.value != null || voiceHoldActive.value) return;
@@ -591,10 +631,17 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
     voiceHoldTimer.value = null;
     const useHiddenPath = canLive2dHiddenVoiceStt();
     if (!store.visible && !useHiddenPath) return;
-    if (store.visible && store.loading) return;
+    interruptCurrentTurnForVoice();
+    voiceStarting.value = true;
+    const captureGeneration = ++speechCaptureGeneration;
     try {
       await speechService.startRecording();
+      if (captureGeneration !== speechCaptureGeneration) {
+        speechService.cancel();
+        return;
+      }
       voiceHoldActive.value = true;
+      voiceController.setPhase("listening");
       sttFromLive2dVoiceChannel.value = useHiddenPath;
       if (useHiddenPath) {
         live2dVoiceChannel.setRecording(true);
@@ -603,10 +650,16 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
       }
       store.error = "";
     } catch (err) {
+      if (captureGeneration !== speechCaptureGeneration) return;
       store.error = microphoneAccessMessage(err);
       voiceHoldActive.value = false;
       sttFromLive2dVoiceChannel.value = false;
       live2dVoiceChannel.reset();
+      voiceController.resetTo("idle");
+    } finally {
+      if (captureGeneration === speechCaptureGeneration) {
+        voiceStarting.value = false;
+      }
     }
   }, 450);
 }
@@ -614,24 +667,35 @@ function onVoiceHoldKeydown(event: KeyboardEvent) {
 async function startLive2dVoiceRecording(): Promise<void> {
   if (!canAvatarClickToTalk() || voiceStarting.value) return;
   voiceStarting.value = true;
+  const captureGeneration = ++speechCaptureGeneration;
   try {
-    stopTtsPlayback();
+    interruptCurrentTurnForVoice();
     await speechService.startRecording();
-    if (!live2dVisible.value) {
+    if (captureGeneration !== speechCaptureGeneration) {
       speechService.cancel();
       return;
     }
+    if (!live2dVisible.value) {
+      speechService.cancel();
+      voiceController.resetTo("idle");
+      return;
+    }
     voiceHoldActive.value = true;
+    voiceController.setPhase("listening");
     sttFromLive2dVoiceChannel.value = true;
     live2dVoiceChannel.setRecording(true);
     store.error = "";
   } catch (err) {
+    if (captureGeneration !== speechCaptureGeneration) return;
     store.error = microphoneAccessMessage(err);
     voiceHoldActive.value = false;
     sttFromLive2dVoiceChannel.value = false;
     live2dVoiceChannel.reset();
+    voiceController.resetTo("idle");
   } finally {
-    voiceStarting.value = false;
+    if (captureGeneration === speechCaptureGeneration) {
+      voiceStarting.value = false;
+    }
   }
 }
 
