@@ -33,8 +33,13 @@ describe("Little Drop voice UI contract", () => {
 
   it("marks avatar submissions as voice turns and consumes streamed sentences", () => {
     expect(shell).toContain('interactionMode: "voice"');
-    expect(shell).toContain("onVoiceSentence: enqueueVoiceSentence");
-    expect(shell).toContain("await finishVoiceResponseStream()");
+    expect(shell).toContain("onVoiceSentence: (sentence) => {");
+    expect(shell).toContain(
+      "isLive2dTtsSessionActive(controller, speechToken)",
+    );
+    expect(shell).toContain(
+      "await finishVoiceResponseStream(controller, speechToken)",
+    );
     expect(shell).toContain("enqueueFallbackReply");
     expect(shell).toContain("queuedVoiceSentences === 0");
     expect(shell).toContain("packSpokenSentences");
